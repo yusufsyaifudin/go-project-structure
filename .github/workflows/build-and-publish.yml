@@ -1,0 +1,55 @@
+name: Build and Publish
+
+on:
+  # run it on push to the default repository branch
+  push:
+    branches:
+      - master
+
+jobs:
+  # define job to build and publish docker image
+  build-and-push-docker-image:
+    name: Build Docker image and push to repositories
+    # run only when code is compiling and tests are passing
+    runs-on: ubuntu-latest
+
+    # steps to perform in job
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Build Golang
+      - name: Set up Docker Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '^1.19' # The Go version to download (if necessary) and use.
+        run: |
+          go test -v -race -coverprofile coverage.cov -cover ./...
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to Github Packages
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image and push to Docker Hub and GitHub Container Registry
+        uses: docker/build-push-action@v3
+        with:
+          # relative path to the place where source code with Dockerfile is located
+          context: .
+          # Note: tags has to be all lower-case
+          tags: |
+            yusufs/go-project-structure:latest
+            ghcr.io/yusufsyaifudin/go-project-structure:latest
+          platforms: linux/amd64,linux/arm64
+          push: true
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}

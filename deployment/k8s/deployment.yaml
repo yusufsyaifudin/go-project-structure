@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: K8S_SERVICE_NAME-instance
+    app.kubernetes.io/name: K8S_SERVICE_NAME-service
+  name: K8S_SERVICE_NAME-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.info/env: staging
+      app.info/id: K8S_SERVICE_NAME-pod
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app.info/env: staging
+        app.info/id: K8S_SERVICE_NAME-pod
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: K8S_SERVICE_NAME-container
+          image: yusufs/go-project-structure:latest # change this to your Docker image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              hostPort: 3000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: K8S_SERVICE_NAME-env-configmap
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 3000
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 3000
+          resources:
+            limits:
+              cpu: 200m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 1Gi
