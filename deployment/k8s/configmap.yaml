@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ys-ns
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: K8S_SERVICE_NAME-env-configmap
+  namespace: ys-ns
+immutable: false
+data:
+  PORT: "3000"

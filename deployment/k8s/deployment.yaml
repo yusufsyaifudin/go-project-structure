@@ -5,6 +5,7 @@ metadata:
     app.kubernetes.io/instance: K8S_SERVICE_NAME-instance
     app.kubernetes.io/name: K8S_SERVICE_NAME-service
   name: K8S_SERVICE_NAME-deployment
+  namespace: ys-ns
 spec:
   replicas: 1
   selector:
