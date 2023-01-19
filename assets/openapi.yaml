@@ -1,0 +1,151 @@
+# Refer the spec here https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.0.3.md
+openapi: '3.0.3'
+info:
+  description: my-app
+  title: my-app
+  version: 1.0.0
+
+servers:
+  - description: Localhost
+    url: http://localhost:3001/
+
+paths:
+
+  /ping:
+    get:
+      operationId: Ping
+      responses:
+        "200":
+          description: Successful ping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResp'
+
+        default:
+          description: "When error happen"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+      summary: Ping
+      description: Ping API as Health-check endpoint
+      tags:
+        - System API
+
+  /system-info:
+    get:
+      operationId: SystemInfo
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfoResp'
+
+        default:
+          description: NotOk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+      summary: System Info
+      description: System Info to check current system usage
+      tags:
+        - System API
+
+components:
+  schemas:
+    PingResp:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "0"
+        status:
+          type: string
+          example: Ok
+        message:
+          type: string
+          example: Message detail for this response
+        data:
+          type: object
+          properties:
+            commit_hash:
+              type: string
+              example: "5e07871"
+            build_time:
+              type: string
+              format: date-time
+              example: "2023-01-19T18:13:43.344189+07:00"
+            startup_time:
+              type: string
+              format: date-time
+              example: "2023-01-19T18:13:43.344189+07:00"
+            uptime_ns:
+              type: integer
+              example: "46892112500"
+            uptime_string:
+              type: string
+              example: "46.892113333s"
+
+    SystemInfoResp:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "0"
+        status:
+          type: string
+          example: Ok
+        message:
+          type: string
+          example: Message detail for this response
+        data:
+          type: object
+          properties:
+            alloc:
+              type: integer
+              example: 1
+            total_alloc:
+              type: integer
+              example: 4
+            sys:
+              type: integer
+              example: 14
+            mallocs:
+              type: integer
+              example: 47238
+            frees:
+              type: integer
+              example: 38677
+
+    ErrorResponseDetail:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "programmatically error, caller call this but with nil error"
+        reasons:
+          type: array
+          items:
+            type: string
+          example:
+            - error reason one
+            - error reason two
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: E0
+        status:
+          type: string
+          example: ErrorGeneral
+        error:
+          $ref: "#/components/schemas/ErrorResponseDetail"
+
