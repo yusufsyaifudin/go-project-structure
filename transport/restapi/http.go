@@ -1,13 +1,13 @@
 package restapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/httpmw"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 )
@@ -34,19 +34,30 @@ func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 
 	e := echo.New()
 	e.Use(
-		httpmw.Logger(httpmw.LoggerOpt{
-			SkipPath: map[string]struct{}{
-				"/ping": {},
-			},
-		}),
 		middleware.RemoveTrailingSlash(),
 		middleware.CORS(),
 	)
 
 	e.HTTPErrorHandler = func(err error, eCtx echo.Context) {
-		_err := eCtx.JSON(http.StatusUnprocessableEntity, respbuilder.Error(err))
+		httpStatus := http.StatusUnprocessableEntity
+
+		var errHTTP *echo.HTTPError
+		if errors.As(err, &errHTTP) {
+			httpStatus = errHTTP.Code
+		}
+
+		var errBinding *echo.BindingError
+		if errors.As(err, &errBinding) {
+			httpStatus = errBinding.Code
+		}
+
+		if httpStatus <= 0 || httpStatus >= 599 {
+			httpStatus = http.StatusInternalServerError
+		}
+
+		_err := eCtx.JSON(httpStatus, respbuilder.Error(respbuilder.ErrGeneral, err))
 		if _err != nil {
-			_err = fmt.Errorf("echo HTTPErrorHandler panic: %w", _err)
+			_err = fmt.Errorf("echo.HTTPErrorHandler panic: %w", _err)
 			panic(_err)
 		}
 	}

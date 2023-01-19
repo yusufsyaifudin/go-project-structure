@@ -19,4 +19,9 @@ build-server:
 	printf "0" > "assets/build_time.txt"
 
 build-docker:
-	docker build -t user-authentication .
+	docker build -t myapp .
+
+test:
+	go test -v -race -count=1 -coverprofile coverage.cov -cover ./...
+	go tool cover -func coverage.cov
+	rm coverage.cov
