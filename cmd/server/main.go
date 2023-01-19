@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
-
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
-
 	"log"
 	"net/http"
 	"os"
@@ -19,25 +17,29 @@ import (
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/yusufsyaifudin/go-project-structure/assets"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
-	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/yusufsyaifudin/go-project-structure/assets"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
 )
 
 type Config struct {
-	HTTPPort  int    `env:"PORT" envDefault:"3000" validate:"required"`
-	LogLevel  string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
-	JaegerURL string `env:"JAEGER_URL" envDefault:"http://localhost:14268/api/traces" validate:"-"`
+	HTTPPort      int    `env:"PORT" envDefault:"3000" validate:"required"`
+	LogLevel      string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
+	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER
+	OtelJaegerURL string `env:"OTEL_JAEGER_URL" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
 }
 
 func main() {
@@ -75,16 +77,29 @@ func main() {
 
 	buildTime := time.Unix(int64(buildTimeInt), 0)
 
-	// add tracer middleware
-	tracerExporter, err := stdoutExporter(os.Stdout)
-	if cfg.JaegerURL != "" {
-		tracerExporter, err = jaegerExporter(cfg.JaegerURL)
+	// prepare tracer exporter, whether using stdout or jaeger
+	var tracerExporter trace.SpanExporter = tracetest.NewNoopExporter()
+	var tracerExporterErr error
+
+	cfg.OtelExporter = strings.TrimSpace(strings.ToUpper(cfg.OtelExporter))
+	switch cfg.OtelExporter {
+	case "STDOUT":
+		tracerExporter, tracerExporterErr = stdoutExporter(debugWriter(systemCtx, logger))
+	case "JAEGER":
+		if cfg.OtelJaegerURL == "" {
+			logger.Error(systemCtx, "cannot use OpenTelemetry JAEGER if is OTEL_JAEGER_URL empty")
+			return
+		}
+
+		tracerExporter, tracerExporterErr = jaegerExporter(cfg.OtelJaegerURL)
 	}
 
-	if err != nil {
-		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", err.Error()))
+	if tracerExporterErr != nil {
+		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", tracerExporterErr.Error()))
 		return
 	}
+
+	logger.Info(systemCtx, fmt.Sprintf("using %s as OpenTelemetry span exporter", cfg.OtelExporter))
 
 	tracerProvider := trace.NewTracerProvider(
 		trace.WithBatcher(tracerExporter),
@@ -187,4 +202,34 @@ func newResource() *resource.Resource {
 		),
 	)
 	return r
+}
+
+// loggerIOWriter wrap ylog.Logger as io.Writer
+type loggerIOWriter struct {
+	ctx    context.Context
+	logger ylog.Logger
+}
+
+var _ io.Writer = (*loggerIOWriter)(nil)
+
+// Write writes p as debug log using ylog.Logger.
+// Since p may contain valid JSON object, we try to convert it as native Go object.
+// Because if we write p directly to logger, it will print as Base64 encoded string.
+// As a penalty, it may require some computation that not actually needed only to print the formatted JSON.
+func (l *loggerIOWriter) Write(p []byte) (n int, err error) {
+	var jsonObj interface{}
+	if json.Unmarshal(p, &jsonObj) != nil {
+		jsonObj = string(p)
+	}
+
+	l.logger.Debug(l.ctx, "tracer log", ylog.KV("data", jsonObj))
+	return len(p), nil
+}
+
+// debugWriter wrap ylog.Logger as io.Writer with context.Context
+func debugWriter(ctx context.Context, logger ylog.Logger) io.Writer {
+	return &loggerIOWriter{
+		ctx:    ctx,
+		logger: logger,
+	}
 }
