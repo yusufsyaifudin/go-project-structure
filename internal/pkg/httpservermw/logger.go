@@ -16,9 +16,9 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
-type Opt func(*logMiddleware) error
+type LoggerOpt func(*logMiddleware) error
 
-func WithMessage(msg string) Opt {
+func LogMwWithMessage(msg string) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if msg == "" {
 			return nil
@@ -29,7 +29,7 @@ func WithMessage(msg string) Opt {
 	}
 }
 
-func WithLogger(logger ylog.Logger) Opt {
+func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if logger == nil {
 			tripper.logger = &ylog.Noop{}
@@ -47,7 +47,7 @@ type logMiddleware struct {
 }
 
 // LoggingMiddleware is a middleware that logs incoming requests
-func LoggingMiddleware(next http.Handler, opts ...Opt) http.Handler {
+func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &logMiddleware{
 		msg:    "request logger",
 		logger: &ylog.Noop{},
@@ -60,7 +60,7 @@ func LoggingMiddleware(next http.Handler, opts ...Opt) http.Handler {
 		}
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	fn := func(w http.ResponseWriter, req *http.Request) {
 		t0 := time.Now()
 
 		reqCtx := context.Background()
@@ -157,7 +157,9 @@ func LoggingMiddleware(next http.Handler, opts ...Opt) http.Handler {
 		if errCum != nil {
 			accessLog.Error = errCum.Error()
 		}
-	})
+	}
+
+	return http.HandlerFunc(fn)
 }
 
 func toSimpleMap(h http.Header) map[string]string {

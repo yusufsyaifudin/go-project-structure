@@ -6,21 +6,29 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
+type IRoutes interface {
+	RegisterRoutes(e *echo.Echo) error
+}
+
 type HTTPConfig struct {
-	BuildCommitID string    `validate:"-"`
-	BuildTime     time.Time `validate:"-"`
-	StartupTime   time.Time `validate:"required"`
+	BuildCommitID string       `validate:"-"`
+	BuildTime     time.Time    `validate:"-"`
+	StartupTime   time.Time    `validate:"required"`
+	Tracer        trace.Tracer `validate:"required"`
 }
 
 type HTTP struct {
-	Config     HTTPConfig
-	EchoServer http.Handler
+	config HTTPConfig
+	echo   *echo.Echo
 }
 
 var _ http.Handler = (*HTTP)(nil)
@@ -62,23 +70,29 @@ func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 		}
 	}
 
-	e.GET("/ping", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, respbuilder.Ok(respbuilder.Success, map[string]interface{}{
-			"ok":          true,
-			"commit_hash": cfg.BuildCommitID,
-			"build_time":  cfg.BuildTime,
-			"start_up":    cfg.StartupTime,
-			"uptime_ns":   time.Since(cfg.StartupTime).Nanoseconds(),
-			"uptime_str":  time.Since(cfg.StartupTime).String(),
-		}))
-	})
+	// Prepare all handler
+	handlerSystem, err := handlersystem.New(
+		handlersystem.WithBuildCommitID(cfg.BuildCommitID),
+		handlersystem.WithBuildTime(cfg.BuildTime),
+		handlersystem.WithStartupTime(cfg.StartupTime),
+		handlersystem.WithTracer(cfg.Tracer),
+	)
+	if err != nil {
+		return nil, err
+	}
 
-	return &HTTP{
-		Config:     cfg,
-		EchoServer: e,
-	}, nil
+	// Register all routes
+	e.GET("/ping", handlerSystem.Ping)
+	e.GET("/system-info", handlerSystem.SystemInfo)
+
+	h := &HTTP{
+		config: cfg,
+		echo:   e,
+	}
+
+	return h, nil
 }
 
 func (h *HTTP) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	h.EchoServer.ServeHTTP(writer, request)
+	h.echo.ServeHTTP(writer, request)
 }
