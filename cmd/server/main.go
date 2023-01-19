@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+
 	"log"
 	"net/http"
 	"os"
@@ -60,14 +62,14 @@ func main() {
 	}
 
 	// ** Prepare logger using ylog
-	ylog.SetupDefaultGlobalLogger(cfg.LogLevel)
+	logger := ylog.SetupZapLogger(cfg.LogLevel)
 
-	ylog.Info(systemCtx, "trying to parse build time info")
+	logger.Info(systemCtx, "trying to parse build time info")
 	serverBuildTime := strings.TrimSpace(strings.Trim(assets.BuildTime, "\n"))
 	buildTimeInt, err := strconv.Atoi(serverBuildTime)
 	if err != nil {
 		err = fmt.Errorf("BuildTime %+v variable not passed during build time: %w", assets.BuildTime, err)
-		ylog.Error(systemCtx, err.Error())
+		logger.Error(systemCtx, err.Error())
 		return
 	}
 
@@ -80,7 +82,7 @@ func main() {
 	}
 
 	if err != nil {
-		ylog.Error(systemCtx, "prepare exporter error", ylog.KV("error", err.Error()))
+		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", err.Error()))
 		return
 	}
 
@@ -91,35 +93,43 @@ func main() {
 	)
 	defer func() {
 		if _err := tracerProvider.Shutdown(context.Background()); _err != nil {
-			ylog.Error(systemCtx, "shutdown tracer error", ylog.KV("error", _err))
+			logger.Error(systemCtx, "shutdown tracer error", ylog.KV("error", _err))
 		}
 	}()
 
 	const tracerName = "myapp-tracer"
-	tracer := tracerProvider.Tracer(tracerName)
-
-	// ** setup server with graceful shutdown
-	ylog.Info(systemCtx, "preparing server http...")
-	serverMuxCfg := restapi.HTTPConfig{
-		BuildCommitID: assets.BuildCommitID,
-		BuildTime:     buildTime,
-		StartupTime:   time.Now(),
-		Tracer:        tracer,
-	}
-
-	var serverMux http.Handler
-	serverMux, err = restapi.NewHTTP(serverMuxCfg)
+	observeMgr, err := observability.NewManager(
+		observability.WithLogger(logger),
+		observability.WithTracerName(tracerName),
+		observability.WithTracerProvider(tracerProvider),
+	)
 	if err != nil {
-		err = fmt.Errorf("error prepare rest api server: %w", err)
-		ylog.Error(systemCtx, err.Error())
+		logger.Error(systemCtx, "failed setup observability manager", ylog.KV("error", err))
 		return
 	}
 
-	serverMux = httpservermw.OpenTelemetryMiddleware(serverMux, httpservermw.OtelMwWithTracer(tracer))
+	// ** setup server with graceful shutdown
+	logger.Info(systemCtx, "preparing server http...")
+	var serverMux http.Handler
+	serverMux, err = restapi.NewHTTP(
+		restapi.WithBuildCommitID(assets.BuildCommitID),
+		restapi.WithBuildTime(buildTime),
+		restapi.WithStartupTime(time.Now()),
+		restapi.WithObservability(observeMgr),
+	)
+	if err != nil {
+		err = fmt.Errorf("error prepare rest api server: %w", err)
+		logger.Error(systemCtx, err.Error())
+		return
+	}
+
+	serverMux = httpservermw.OpenTelemetryMiddleware(serverMux,
+		httpservermw.OtelMwWithTracer(observeMgr.Tracer()),
+	)
 
 	// add logger middleware
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
-		httpservermw.LogMwWithLogger(ylog.GetGlobalLogger()),
+		httpservermw.LogMwWithLogger(observeMgr.Logger()),
 		httpservermw.LogMwWithMessage("incoming request log"),
 	)
 
@@ -131,7 +141,7 @@ func main() {
 
 	var errChan = make(chan error, 1)
 	go func() {
-		ylog.Info(systemCtx, fmt.Sprintf("starting http on port %s", httpPortStr))
+		logger.Info(systemCtx, fmt.Sprintf("starting http on port %s", httpPortStr))
 		errChan <- httpServer.ListenAndServe()
 	}()
 
@@ -140,11 +150,11 @@ func main() {
 	select {
 	case s := <-signalChan:
 		msg := fmt.Sprintf("got an interrupt: %+v", s)
-		ylog.Error(systemCtx, msg)
+		logger.Error(systemCtx, msg)
 	case _err := <-errChan:
 		if _err != nil {
 			msg := fmt.Sprintf("error while running server: %s", _err)
-			ylog.Error(systemCtx, msg)
+			logger.Error(systemCtx, msg)
 		}
 	}
 }

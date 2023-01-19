@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"time"
 
-	"go.opentelemetry.io/otel/trace"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 
 	"github.com/labstack/echo/v4"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
@@ -34,12 +34,12 @@ func WithStartupTime(t time.Time) Opt {
 	}
 }
 
-func WithTracer(tracer trace.Tracer) Opt {
+func WithObservability(mgr observability.Observability) Opt {
 	return func(handler *SystemHandler) error {
-		if tracer == nil {
+		if mgr == nil {
 			return nil
 		}
-		handler.tracer = tracer
+		handler.observability = mgr
 		return nil
 	}
 }
@@ -48,13 +48,12 @@ type SystemHandler struct {
 	buildCommitID string
 	buildTime     time.Time
 	startupTime   time.Time
-	tracer        trace.Tracer
+	observability observability.Observability
 }
 
 func New(opts ...Opt) (*SystemHandler, error) {
 	systemHandler := &SystemHandler{
 		startupTime: time.Now(),
-		tracer:      trace.NewNoopTracerProvider().Tracer("system_handler_tracer"),
 	}
 
 	for _, opt := range opts {
@@ -77,7 +76,7 @@ type PingResp struct {
 
 func (s *SystemHandler) Ping(c echo.Context) error {
 	ctx := c.Request().Context()
-	_, span := s.tracer.Start(ctx, "Ping Handler")
+	_, span := s.observability.Tracer().Start(ctx, "Ping Handler")
 	defer span.End()
 
 	return c.JSON(http.StatusOK, respbuilder.Ok(respbuilder.Success, PingResp{

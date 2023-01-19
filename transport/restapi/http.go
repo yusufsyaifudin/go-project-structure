@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"go.opentelemetry.io/otel/trace"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -15,36 +15,78 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
-type IRoutes interface {
-	RegisterRoutes(e *echo.Echo) error
+type HTTPConfig func(*HTTP) error
+
+func WithBuildCommitID(hash string) HTTPConfig {
+	return func(h *HTTP) error {
+		h.buildCommitID = hash
+		return nil
+	}
 }
 
-type HTTPConfig struct {
-	BuildCommitID string       `validate:"-"`
-	BuildTime     time.Time    `validate:"-"`
-	StartupTime   time.Time    `validate:"required"`
-	Tracer        trace.Tracer `validate:"required"`
+func WithBuildTime(t time.Time) HTTPConfig {
+	return func(h *HTTP) error {
+		h.buildTime = t
+		return nil
+	}
+}
+
+func WithStartupTime(t time.Time) HTTPConfig {
+	return func(h *HTTP) error {
+		h.startupTime = t
+		return nil
+	}
+}
+
+func WithObservability(o observability.Observability) HTTPConfig {
+	return func(h *HTTP) error {
+		if o == nil {
+			return nil
+		}
+
+		h.observability = o
+		return nil
+	}
 }
 
 type HTTP struct {
-	config HTTPConfig
-	echo   *echo.Echo
+	buildCommitID string                      `validate:"-"`
+	buildTime     time.Time                   `validate:"-"`
+	startupTime   time.Time                   `validate:"required"`
+	observability observability.Observability `validate:"required"`
+
+	echo *echo.Echo
 }
 
 var _ http.Handler = (*HTTP)(nil)
 
-func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
-	err := validator.Validate(cfg)
-	if err != nil {
-		err = fmt.Errorf("http server config error: %w", err)
-		return nil, err
-	}
-
+func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 	e := echo.New()
 	e.Use(
 		middleware.RemoveTrailingSlash(),
 		middleware.CORS(),
 	)
+
+	h := &HTTP{
+		buildCommitID: "not-exist",
+		buildTime:     time.Now(),
+		startupTime:   time.Now(),
+		observability: observability.NewNoop(),
+		echo:          e,
+	}
+
+	for _, cfg := range configs {
+		err := cfg(h)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err := validator.Validate(h)
+	if err != nil {
+		err = fmt.Errorf("http server config error: %w", err)
+		return nil, err
+	}
 
 	e.HTTPErrorHandler = func(err error, eCtx echo.Context) {
 		httpStatus := http.StatusUnprocessableEntity
@@ -72,10 +114,10 @@ func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 
 	// Prepare all handler
 	handlerSystem, err := handlersystem.New(
-		handlersystem.WithBuildCommitID(cfg.BuildCommitID),
-		handlersystem.WithBuildTime(cfg.BuildTime),
-		handlersystem.WithStartupTime(cfg.StartupTime),
-		handlersystem.WithTracer(cfg.Tracer),
+		handlersystem.WithBuildCommitID(h.buildCommitID),
+		handlersystem.WithBuildTime(h.buildTime),
+		handlersystem.WithStartupTime(h.startupTime),
+		handlersystem.WithObservability(h.observability),
 	)
 	if err != nil {
 		return nil, err
@@ -84,11 +126,6 @@ func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 	// Register all routes
 	e.GET("/ping", handlerSystem.Ping)
 	e.GET("/system-info", handlerSystem.SystemInfo)
-
-	h := &HTTP{
-		config: cfg,
-		echo:   e,
-	}
 
 	return h, nil
 }
