@@ -19,6 +19,8 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -38,8 +40,9 @@ import (
 type Config struct {
 	HTTPPort      int    `env:"PORT" envDefault:"3000" validate:"required"`
 	LogLevel      string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
-	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER
-	OtelJaegerURL string `env:"OTEL_JAEGER_URL" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
+	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP
+	OtelJaegerURL string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
+	OtelOtlpURL   string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
 }
 
 func main() {
@@ -87,11 +90,25 @@ func main() {
 		tracerExporter, tracerExporterErr = stdoutExporter(debugWriter(systemCtx, logger))
 	case "JAEGER":
 		if cfg.OtelJaegerURL == "" {
-			logger.Error(systemCtx, "cannot use OpenTelemetry JAEGER if is OTEL_JAEGER_URL empty")
+			logger.Error(systemCtx, "cannot use OpenTelemetry JAEGER if is OTEL_EXPORTER_JAEGER_ENDPOINT empty")
 			return
 		}
 
 		tracerExporter, tracerExporterErr = jaegerExporter(cfg.OtelJaegerURL)
+
+	case "OTLP":
+		if cfg.OtelOtlpURL == "" {
+			logger.Error(systemCtx, "cannot use OpenTelemetry OTLP if is OTEL_EXPORTER_OTLP_ENDPOINT empty")
+			return
+		}
+
+		tracerExporter, tracerExporterErr = otlptrace.New(
+			context.Background(),
+			otlptracehttp.NewClient(
+				otlptracehttp.WithInsecure(),
+				otlptracehttp.WithEndpoint(cfg.OtelOtlpURL),
+			),
+		)
 	}
 
 	if tracerExporterErr != nil {

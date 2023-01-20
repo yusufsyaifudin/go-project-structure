@@ -1,0 +1,39 @@
+# Use root/password as user/password credentials
+version: '3.8'
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1
+    container_name: jaeger
+    restart: always
+    command:
+      - '--collector.otlp.enabled=true'
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686" # dashboard
+      - "14268:14268" # Accepts spans directly from clients in jaeger.thrift format with binary thrift protocol (POST to /api/traces). Also serves sampling policies at /api/sampling, similar to Agent’s port 5778.
+      - "9411:9411" # Accepts Zipkin spans in Thrift, JSON and Proto (disabled by default).
+      - "14269:14269" # Admin port: health check at / and metrics at /metrics.
+      - "14317:4317" # gRPC Accepts traces in OpenTelemetry OTLP format if --collector.otlp.enabled=true.
+      - "14318:4318" # HTTP Accepts traces in OpenTelemetry OTLP format if --collector.otlp.enabled=true.
+      - "14250:14250" # Used by jaeger-agent to send spans in model.proto format.
+
+  # Collector
+  otel-collector:
+    image: otel/opentelemetry-collector:0.69.0
+    command: [ "--config=/etc/otel-collector-config.yaml" ]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "1888:1888"   # pprof extension
+      - "8888:8888"   # Prometheus' metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP http receiver
+      - "55679:55679" # zpages extension
+    depends_on:
+      - jaeger
