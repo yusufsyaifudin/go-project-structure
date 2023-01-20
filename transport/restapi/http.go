@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 
 	"github.com/labstack/echo/v4"
@@ -88,29 +90,7 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 		return nil, err
 	}
 
-	e.HTTPErrorHandler = func(err error, eCtx echo.Context) {
-		httpStatus := http.StatusUnprocessableEntity
-
-		var errHTTP *echo.HTTPError
-		if errors.As(err, &errHTTP) {
-			httpStatus = errHTTP.Code
-		}
-
-		var errBinding *echo.BindingError
-		if errors.As(err, &errBinding) {
-			httpStatus = errBinding.Code
-		}
-
-		if httpStatus <= 0 || httpStatus >= 599 {
-			httpStatus = http.StatusInternalServerError
-		}
-
-		_err := eCtx.JSON(httpStatus, respbuilder.Error(respbuilder.ErrGeneral, err))
-		if _err != nil {
-			_err = fmt.Errorf("echo.HTTPErrorHandler panic: %w", _err)
-			panic(_err)
-		}
-	}
+	e.HTTPErrorHandler = h.httpErrorHandler
 
 	// Prepare all handler
 	handlerSystem, err := handlersystem.New(
@@ -132,4 +112,30 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 
 func (h *HTTP) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	h.echo.ServeHTTP(writer, request)
+}
+
+func (h *HTTP) httpErrorHandler(err error, eCtx echo.Context) {
+	ctx := eCtx.Request().Context()
+
+	httpStatus := http.StatusUnprocessableEntity
+
+	var errHTTP *echo.HTTPError
+	if errors.As(err, &errHTTP) {
+		httpStatus = errHTTP.Code
+	}
+
+	var errBinding *echo.BindingError
+	if errors.As(err, &errBinding) {
+		httpStatus = errBinding.Code
+	}
+
+	// if HTTP status codes not registered in IANA, then use default 500 code
+	if http.StatusText(httpStatus) == "" {
+		httpStatus = http.StatusInternalServerError
+	}
+
+	_err := eCtx.JSON(httpStatus, respbuilder.Error(respbuilder.ErrGeneral, err))
+	if _err != nil {
+		h.observability.Logger().Error(ctx, "echo.HTTPErrorHandler write json error", ylog.KV("error", _err))
+	}
 }
