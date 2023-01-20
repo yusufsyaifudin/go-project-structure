@@ -5,9 +5,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
-
 	"github.com/labstack/echo/v4"
+
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 )
 
@@ -88,45 +88,48 @@ func (s *SystemHandler) Ping(c echo.Context) error {
 	}))
 }
 
-type SystemInfoRespBySize [61]struct {
+type SystemInfoRespBySize struct {
 	Size    uint32 `json:"size,omitempty"`
 	Mallocs uint64 `json:"mallocs,omitempty"`
 	Frees   uint64 `json:"frees,omitempty"`
 }
 
 type SystemInfoResp struct {
-	Alloc         uint64               `json:"alloc,omitempty"`
-	TotalAlloc    uint64               `json:"total_alloc,omitempty"`
-	Sys           uint64               `json:"sys,omitempty"`
-	Lookups       uint64               `json:"lookups,omitempty"`
-	Mallocs       uint64               `json:"mallocs,omitempty"`
-	Frees         uint64               `json:"frees,omitempty"`
-	HeapAlloc     uint64               `json:"heap_alloc,omitempty"`
-	HeapSys       uint64               `json:"heap_sys,omitempty"`
-	HeapIdle      uint64               `json:"heap_idle,omitempty"`
-	HeapInuse     uint64               `json:"heap_inuse,omitempty"`
-	HeapReleased  uint64               `json:"heap_released,omitempty"`
-	HeapObjects   uint64               `json:"heap_objects,omitempty"`
-	StackInuse    uint64               `json:"stack_inuse,omitempty"`
-	StackSys      uint64               `json:"stack_sys,omitempty"`
-	MSpanInuse    uint64               `json:"m_span_inuse,omitempty"`
-	MSpanSys      uint64               `json:"m_span_sys,omitempty"`
-	MCacheInuse   uint64               `json:"m_cache_inuse,omitempty"`
-	MCacheSys     uint64               `json:"m_cache_sys,omitempty"`
-	BuckHashSys   uint64               `json:"buck_hash_sys,omitempty"`
-	GCSys         uint64               `json:"gc_sys,omitempty"`
-	OtherSys      uint64               `json:"other_sys,omitempty"`
-	NextGC        uint64               `json:"next_gc,omitempty"`
-	LastGC        uint64               `json:"last_gc,omitempty"`
-	PauseTotalNs  uint64               `json:"pause_total_ns,omitempty"`
-	PauseNs       [256]uint64          `json:"pause_ns,omitempty"`
-	PauseEnd      [256]uint64          `json:"pause_end,omitempty"`
-	NumGC         uint32               `json:"num_gc,omitempty"`
-	NumForcedGC   uint32               `json:"num_forced_gc,omitempty"`
-	GCCPUFraction float64              `json:"gccpu_fraction,omitempty"`
-	EnableGC      bool                 `json:"enable_gc,omitempty"`
-	DebugGC       bool                 `json:"debug_gc,omitempty"`
-	BySize        SystemInfoRespBySize `json:"by_size,omitempty"`
+	NumberGoRoutine int `json:"number_go_routine,omitempty"`
+
+	// This is from runtime.MemStats
+	Alloc         uint64                 `json:"alloc,omitempty"`
+	TotalAlloc    uint64                 `json:"total_alloc,omitempty"`
+	Sys           uint64                 `json:"sys,omitempty"`
+	Lookups       uint64                 `json:"lookups,omitempty"`
+	Mallocs       uint64                 `json:"mallocs,omitempty"`
+	Frees         uint64                 `json:"frees,omitempty"`
+	HeapAlloc     uint64                 `json:"heap_alloc,omitempty"`
+	HeapSys       uint64                 `json:"heap_sys,omitempty"`
+	HeapIdle      uint64                 `json:"heap_idle,omitempty"`
+	HeapInuse     uint64                 `json:"heap_inuse,omitempty"`
+	HeapReleased  uint64                 `json:"heap_released,omitempty"`
+	HeapObjects   uint64                 `json:"heap_objects,omitempty"`
+	StackInuse    uint64                 `json:"stack_inuse,omitempty"`
+	StackSys      uint64                 `json:"stack_sys,omitempty"`
+	MSpanInuse    uint64                 `json:"m_span_inuse,omitempty"`
+	MSpanSys      uint64                 `json:"m_span_sys,omitempty"`
+	MCacheInuse   uint64                 `json:"m_cache_inuse,omitempty"`
+	MCacheSys     uint64                 `json:"m_cache_sys,omitempty"`
+	BuckHashSys   uint64                 `json:"buck_hash_sys,omitempty"`
+	GCSys         uint64                 `json:"gc_sys,omitempty"`
+	OtherSys      uint64                 `json:"other_sys,omitempty"`
+	NextGC        uint64                 `json:"next_gc,omitempty"`
+	LastGC        uint64                 `json:"last_gc,omitempty"`
+	PauseTotalNs  uint64                 `json:"pause_total_ns,omitempty"`
+	PauseNs       [256]uint64            `json:"pause_ns,omitempty"`
+	PauseEnd      [256]uint64            `json:"pause_end,omitempty"`
+	NumGC         uint32                 `json:"num_gc,omitempty"`
+	NumForcedGC   uint32                 `json:"num_forced_gc,omitempty"`
+	GCCPUFraction float64                `json:"gccpu_fraction,omitempty"`
+	EnableGC      bool                   `json:"enable_gc,omitempty"`
+	DebugGC       bool                   `json:"debug_gc,omitempty"`
+	BySize        []SystemInfoRespBySize `json:"by_size,omitempty"`
 }
 
 func (s *SystemHandler) SystemInfo(c echo.Context) error {
@@ -137,39 +140,50 @@ func (s *SystemHandler) SystemInfo(c echo.Context) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
+	bySize := make([]SystemInfoRespBySize, 0)
+	for _, size := range m.BySize {
+		bySize = append(bySize, SystemInfoRespBySize{
+			Size:    size.Size,
+			Mallocs: size.Mallocs,
+			Frees:   size.Frees,
+		})
+	}
+
 	resp := SystemInfoResp{
+		NumberGoRoutine: runtime.NumGoroutine(),
+
 		Alloc:         bToMb(m.Alloc),
 		TotalAlloc:    bToMb(m.TotalAlloc),
 		Sys:           bToMb(m.Sys),
 		Lookups:       m.Lookups,
 		Mallocs:       m.Mallocs,
 		Frees:         m.Frees,
-		HeapAlloc:     0,
-		HeapSys:       0,
-		HeapIdle:      0,
-		HeapInuse:     0,
-		HeapReleased:  0,
-		HeapObjects:   0,
-		StackInuse:    0,
-		StackSys:      0,
-		MSpanInuse:    0,
-		MSpanSys:      0,
-		MCacheInuse:   0,
-		MCacheSys:     0,
-		BuckHashSys:   0,
-		GCSys:         0,
-		OtherSys:      0,
-		NextGC:        0,
-		LastGC:        0,
-		PauseTotalNs:  0,
-		PauseNs:       [256]uint64{},
-		PauseEnd:      [256]uint64{},
+		HeapAlloc:     bToMb(m.HeapAlloc),
+		HeapSys:       bToMb(m.HeapSys),
+		HeapIdle:      bToMb(m.HeapIdle),
+		HeapInuse:     bToMb(m.HeapInuse),
+		HeapReleased:  bToMb(m.HeapReleased),
+		HeapObjects:   m.HeapObjects,
+		StackInuse:    bToMb(m.StackInuse),
+		StackSys:      bToMb(m.StackSys),
+		MSpanInuse:    bToMb(m.MSpanInuse),
+		MSpanSys:      bToMb(m.MSpanSys),
+		MCacheInuse:   bToMb(m.MCacheInuse),
+		MCacheSys:     bToMb(m.MCacheSys),
+		BuckHashSys:   bToMb(m.BuckHashSys),
+		GCSys:         bToMb(m.GCSys),
+		OtherSys:      bToMb(m.OtherSys),
+		NextGC:        m.NextGC,
+		LastGC:        m.LastGC,
+		PauseTotalNs:  m.PauseTotalNs,
+		PauseNs:       m.PauseNs,
+		PauseEnd:      m.PauseEnd,
 		NumGC:         m.NumGC,
 		NumForcedGC:   m.NumForcedGC,
 		GCCPUFraction: m.GCCPUFraction,
 		EnableGC:      m.EnableGC,
 		DebugGC:       m.DebugGC,
-		BySize:        SystemInfoRespBySize{},
+		BySize:        bySize,
 	}
 
 	return c.JSON(http.StatusOK, respbuilder.Ok(respbuilder.Success, resp))
