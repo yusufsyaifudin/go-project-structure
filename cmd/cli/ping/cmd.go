@@ -8,13 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
-
 	"github.com/jessevdk/go-flags"
-
 	"github.com/mitchellh/cli"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )

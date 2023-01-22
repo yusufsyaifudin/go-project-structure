@@ -7,8 +7,7 @@ import (
 	"os"
 	"time"
 
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
@@ -25,8 +24,10 @@ import (
 )
 
 type Config struct {
-	LogLevel    string `env:"LOG_LEVEL" envDefault:"DEBUG"`
-	OtelOtlpURL string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318"`
+	LogLevel      string `env:"LOG_LEVEL" envDefault:"DEBUG"`
+	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP
+	OtelJaegerURL string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
+	OtelOtlpURL   string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
 }
 
 func main() {
@@ -51,19 +52,19 @@ func main() {
 	// If not configured, it will not export anything using noop exporter.
 	var tracerExporter trace.SpanExporter
 	var tracerErr error
-	tracerExporter, tracerErr = otlptrace.New(
-		context.Background(),
-		otlptracehttp.NewClient(
-			otlptracehttp.WithInsecure(),
-			otlptracehttp.WithEndpoint(cfg.OtelOtlpURL),
-		),
+	// prepare tracer exporter, whether using stdout or jaeger
+	tracerExporter, tracerErr = otel.NewTracerExporter(cfg.OtelExporter,
+		otel.WithContext(systemCtx),
+		otel.WithLogger(logger),
+		otel.WithJaegerEndpoint(cfg.OtelJaegerURL),
+		otel.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)
 	if tracerErr != nil {
 		tracerExporter = tracetest.NewNoopExporter()
 
 		logger.Error(systemCtx, "failed configure tracer", ylog.KV("error", err))
 	} else {
-		logger.Debug(systemCtx, "using otlp exporter")
+		logger.Debug(systemCtx, fmt.Sprintf("using %s exporter", cfg.OtelExporter))
 	}
 
 	tracerProvider := trace.NewTracerProvider(

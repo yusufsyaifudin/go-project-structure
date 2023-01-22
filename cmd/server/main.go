@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,16 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
+
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/jaeger"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -81,35 +76,12 @@ func main() {
 	buildTime := time.Unix(int64(buildTimeInt), 0)
 
 	// prepare tracer exporter, whether using stdout or jaeger
-	var tracerExporter trace.SpanExporter = tracetest.NewNoopExporter()
-	var tracerExporterErr error
-
-	cfg.OtelExporter = strings.TrimSpace(strings.ToUpper(cfg.OtelExporter))
-	switch cfg.OtelExporter {
-	case "STDOUT":
-		tracerExporter, tracerExporterErr = stdoutExporter(debugWriter(systemCtx, logger))
-	case "JAEGER":
-		if cfg.OtelJaegerURL == "" {
-			logger.Error(systemCtx, "cannot use OpenTelemetry JAEGER if is OTEL_EXPORTER_JAEGER_ENDPOINT empty")
-			return
-		}
-
-		tracerExporter, tracerExporterErr = jaegerExporter(cfg.OtelJaegerURL)
-
-	case "OTLP":
-		if cfg.OtelOtlpURL == "" {
-			logger.Error(systemCtx, "cannot use OpenTelemetry OTLP if is OTEL_EXPORTER_OTLP_ENDPOINT empty")
-			return
-		}
-
-		tracerExporter, tracerExporterErr = otlptrace.New(
-			context.Background(),
-			otlptracehttp.NewClient(
-				otlptracehttp.WithInsecure(),
-				otlptracehttp.WithEndpoint(cfg.OtelOtlpURL),
-			),
-		)
-	}
+	tracerExporter, tracerExporterErr := otel.NewTracerExporter(cfg.OtelExporter,
+		otel.WithContext(systemCtx),
+		otel.WithLogger(logger),
+		otel.WithJaegerEndpoint(cfg.OtelJaegerURL),
+		otel.WithOTLPEndpoint(cfg.OtelOtlpURL),
+	)
 
 	if tracerExporterErr != nil {
 		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", tracerExporterErr.Error()))
@@ -192,22 +164,6 @@ func main() {
 	}
 }
 
-// jaegerExporter Create the Jaeger exporter
-func jaegerExporter(endpoint string) (trace.SpanExporter, error) {
-	return jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(endpoint)))
-}
-
-// stdoutExporter returns a console exporter.
-func stdoutExporter(w io.Writer) (trace.SpanExporter, error) {
-	return stdouttrace.New(
-		stdouttrace.WithWriter(w),
-		// Use human-readable output.
-		stdouttrace.WithPrettyPrint(),
-		// Do not print timestamps for the demo.
-		stdouttrace.WithoutTimestamps(),
-	)
-}
-
 // newResource returns a resource describing this application.
 func newResource() *resource.Resource {
 	r, _ := resource.Merge(
@@ -220,34 +176,4 @@ func newResource() *resource.Resource {
 		),
 	)
 	return r
-}
-
-// loggerIOWriter wrap ylog.Logger as io.Writer
-type loggerIOWriter struct {
-	ctx    context.Context
-	logger ylog.Logger
-}
-
-var _ io.Writer = (*loggerIOWriter)(nil)
-
-// Write writes p as debug log using ylog.Logger.
-// Since p may contain valid JSON object, we try to convert it as native Go object.
-// Because if we write p directly to logger, it will print as Base64 encoded string.
-// As a penalty, it may require some computation that not actually needed only to print the formatted JSON.
-func (l *loggerIOWriter) Write(p []byte) (n int, err error) {
-	var jsonObj interface{}
-	if json.Unmarshal(p, &jsonObj) != nil {
-		jsonObj = string(p)
-	}
-
-	l.logger.Debug(l.ctx, "tracer log", ylog.KV("data", jsonObj))
-	return len(p), nil
-}
-
-// debugWriter wrap ylog.Logger as io.Writer with context.Context
-func debugWriter(ctx context.Context, logger ylog.Logger) io.Writer {
-	return &loggerIOWriter{
-		ctx:    ctx,
-		logger: logger,
-	}
 }
