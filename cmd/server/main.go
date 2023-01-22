@@ -163,6 +163,7 @@ func main() {
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
 		httpservermw.LogMwWithLogger(observeMgr.Logger()),
 		httpservermw.LogMwWithMessage("incoming request log"),
+		httpservermw.LogMwWithTracer(observeMgr.Tracer()),
 	)
 
 	httpPortStr := fmt.Sprintf(":%d", cfg.HTTPPort)

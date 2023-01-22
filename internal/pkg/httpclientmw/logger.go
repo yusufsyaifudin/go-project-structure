@@ -2,6 +2,7 @@ package httpclientmw
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,12 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/multierr"
+
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type Opt func(*roundTripper) error
 
+// WithBaseRoundTripper replace base http.RoundTripper with new one.
 func WithBaseRoundTripper(h http.RoundTripper) Opt {
 	return func(tripper *roundTripper) error {
 		if tripper == nil {
@@ -27,6 +33,7 @@ func WithBaseRoundTripper(h http.RoundTripper) Opt {
 	}
 }
 
+// WithMessage replaces the message on the log.
 func WithMessage(msg string) Opt {
 	return func(tripper *roundTripper) error {
 		if msg == "" {
@@ -38,6 +45,7 @@ func WithMessage(msg string) Opt {
 	}
 }
 
+// WithLogger set logger instance for this http.Client logger.
 func WithLogger(logger ylog.Logger) Opt {
 	return func(tripper *roundTripper) error {
 		if logger == nil {
@@ -50,19 +58,37 @@ func WithLogger(logger ylog.Logger) Opt {
 	}
 }
 
+// WithTracer set tracer instance to add span.
+func WithTracer(t trace.Tracer) Opt {
+	return func(tripper *roundTripper) error {
+		if t == nil {
+			tripper.tracer = trace.NewNoopTracerProvider().Tracer("with_noop_tracer")
+			return nil
+		}
+
+		tripper.tracer = t
+		return nil
+	}
+}
+
+// roundTripper hold an implementation of http.RoundTripper
 type roundTripper struct {
 	base   http.RoundTripper
 	msg    string
 	logger ylog.Logger
+	tracer trace.Tracer
 }
 
 var _ http.RoundTripper = (*roundTripper)(nil)
 
+// NewHttpRoundTripper return http.RoundTripper to be used as "middleware" in http.Client
+// to log any outgoing http request.
 func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
 	instance := &roundTripper{
 		base:   http.DefaultTransport,
 		msg:    "request logger",
 		logger: &ylog.Noop{},
+		tracer: trace.NewNoopTracerProvider().Tracer("noop_tracer"),
 	}
 
 	for _, opt := range opts {
@@ -75,20 +101,41 @@ func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
 	return instance
 }
 
+// RoundTrip do an http.RoundTrip and log the request/response body.
 func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	t0 := time.Now()
+
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+
+	// create new span for this request
+	var parentCtx = context.Background()
+	if req != nil && req.Context() != nil {
+		parentCtx = req.Context()
+	}
+
+	var parentSpan trace.Span
+	parentCtx, parentSpan = r.tracer.Start(parentCtx, "Capture http.RoundTrip request")
+	defer parentSpan.End() // ending the request span
+
+	if req != nil {
+		// extract from parent request header
+		parentCtx = propagator.Extract(parentCtx, propagation.HeaderCarrier(req.Header))
+
+		// Inject header needed to pass through the OpenTelemetry span context.
+		propagator.Inject(parentCtx, propagation.HeaderCarrier(req.Header))
+	}
 
 	var (
 		respOriginal *http.Response // final response
 		errCum       error          // final error
 
-		reqCtx          = req.Context()
 		reqBodyBuf      = &bytes.Buffer{}
 		reqBodyErr      error
 		reqBodyCaptured interface{}
 	)
 
 	if req != nil && req.Body != nil {
+
 		_, reqBodyErr = io.Copy(reqBodyBuf, req.Body)
 		if reqBodyErr != nil {
 			errCum = multierr.Append(errCum, fmt.Errorf("error copy request body: %w", reqBodyErr))
@@ -108,7 +155,7 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	var roundTripErr error
-	respOriginal, roundTripErr = r.base.RoundTrip(req)
+	respOriginal, roundTripErr = r.base.RoundTrip(req.WithContext(parentCtx))
 	if roundTripErr != nil {
 		errCum = multierr.Append(errCum, fmt.Errorf("error doing actual request: %w", roundTripErr))
 	}
@@ -165,13 +212,17 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// append error if any
 	if errCum != nil {
 		accessLog.Error = errCum.Error()
+
+		parentSpan.RecordError(errCum)
+		parentSpan.SetStatus(codes.Error, "some error occurred during capturing log")
 	}
 
-	r.logger.Access(reqCtx, r.msg, accessLog)
+	r.logger.Access(parentCtx, r.msg, accessLog)
 
 	return respOriginal, roundTripErr
 }
 
+// toSimpleMap converts http.Header which as array of string as value to simple string.
 func toSimpleMap(h http.Header) map[string]string {
 	out := map[string]string{}
 	for k, v := range h {

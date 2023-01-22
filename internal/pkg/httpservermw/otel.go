@@ -16,6 +16,7 @@ type OtelOpt func(*otelMw) error
 func OtelMwWithTracer(tracer trace.Tracer) OtelOpt {
 	return func(mw *otelMw) error {
 		if tracer == nil {
+			mw.tracer = trace.NewNoopTracerProvider().Tracer("with_noop_tracer")
 			return nil
 		}
 
@@ -41,24 +42,25 @@ func OpenTelemetryMiddleware(next http.Handler, opts ...OtelOpt) http.Handler {
 		}
 	}
 
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+
 	fn := func(w http.ResponseWriter, req *http.Request) {
 
 		reqCtx := req.Context()
 		spanName := fmt.Sprintf("%s %s", req.Method, req.URL.EscapedPath())
 
-		propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-
 		// extract from request header
 		reqCtx = propagator.Extract(reqCtx, propagation.HeaderCarrier(req.Header))
 
 		// create new span for this request
-		newReqCtx, span := l.tracer.Start(reqCtx, spanName)
+		var span trace.Span
+		reqCtx, span = l.tracer.Start(reqCtx, spanName)
 		defer span.End()
 
 		// Inject OpenTelemetry to response header
-		propagator.Inject(newReqCtx, propagation.HeaderCarrier(w.Header()))
+		propagator.Inject(reqCtx, propagation.HeaderCarrier(w.Header()))
 
-		next.ServeHTTP(w, req.WithContext(newReqCtx))
+		next.ServeHTTP(w, req.WithContext(reqCtx))
 
 	}
 

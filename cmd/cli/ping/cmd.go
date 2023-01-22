@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
+
 	"github.com/jessevdk/go-flags"
 
 	"github.com/mitchellh/cli"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
@@ -81,15 +82,16 @@ func (c *CMD) Run(args []string) int {
 	}
 
 	client := http.DefaultClient
+	client.Transport = httpclientmw.NewHttpRoundTripper(
+		httpclientmw.WithLogger(c.logger),
+		httpclientmw.WithTracer(c.tracer),
+	)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(flag.Server, "/")+"/ping", nil)
 	if err != nil {
 		c.logger.Error(ctx, "cannot prepare request", ylog.KV("error", err))
 		return 1
 	}
-
-	// add tracer data into request header, so the same tracer span can be continued by the server
-	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-	propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	resp, err := client.Do(req)
 	if err != nil {

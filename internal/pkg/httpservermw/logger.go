@@ -11,6 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/multierr"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
@@ -41,9 +45,23 @@ func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	}
 }
 
+// LogMwWithTracer set tracer instance to add span.
+func LogMwWithTracer(t trace.Tracer) LoggerOpt {
+	return func(tripper *logMiddleware) error {
+		if t == nil {
+			tripper.tracer = trace.NewNoopTracerProvider().Tracer("with_noop_tracer")
+			return nil
+		}
+
+		tripper.tracer = t
+		return nil
+	}
+}
+
 type logMiddleware struct {
 	msg    string
 	logger ylog.Logger
+	tracer trace.Tracer
 }
 
 // LoggingMiddleware is a middleware that logs incoming requests
@@ -51,6 +69,7 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &logMiddleware{
 		msg:    "request logger",
 		logger: &ylog.Noop{},
+		tracer: trace.NewNoopTracerProvider().Tracer("noop_tracer"),
 	}
 
 	for _, opt := range opts {
@@ -60,22 +79,35 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		}
 	}
 
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		t0 := time.Now()
 
-		reqCtx := context.Background()
+		parentCtx := context.Background()
 		if req != nil && req.Context() != nil {
-			reqCtx = req.Context()
+			parentCtx = req.Context()
+
+			// extract from request header if any span pass through from request context via header
+			parentCtx = propagator.Extract(parentCtx, propagation.HeaderCarrier(req.Header))
 		}
 
-		accessLog := ylog.AccessLogData{}
-		defer func() {
-			accessLog.ElapsedTime = time.Since(t0).Nanoseconds()
+		// parent span for this logging middleware
+		spanName := "[Log MW]"
+		if req != nil {
+			spanName = fmt.Sprintf("%s %s [Log MW]", req.Method, req.URL.EscapedPath())
+		}
 
-			// write log here
-			l.logger.Access(reqCtx, l.msg, accessLog)
-		}()
+		var parentSpan trace.Span
+		parentCtx, parentSpan = l.tracer.Start(parentCtx, spanName)
+		defer parentSpan.End()
 
+		// create child span for this request and pass it to the actual handler span.
+		// this span will end after this middleware function call done.
+		reqCtx, reqSpan := l.tracer.Start(parentCtx, "Log middleware")
+		defer reqSpan.End()
+
+		_, captReqSpan := l.tracer.Start(reqCtx, "Capture request")
 		var (
 			errCum error // final cumulative error
 
@@ -103,8 +135,13 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			reqBodyCaptured = reqBodyBuf.String()
 		}
 
+		accessLog := ylog.AccessLogData{}
+
 		// append to map only when the http.Request is not nil
 		if req != nil {
+			// extract from request header
+			reqCtx = propagator.Extract(reqCtx, propagation.HeaderCarrier(req.Header))
+
 			accessLog.Method = req.Method
 			accessLog.Host = req.URL.Host
 			accessLog.Path = req.URL.EscapedPath()
@@ -114,9 +151,20 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			}
 		}
 
+		// ending the capture request span right before we do actual ServeHTTP.
+		// meaning that *this* span only to capture how many times needed to get the request body
+		captReqSpan.End()
+
 		// Pass the request to the next handler
 		respRec := httptest.NewRecorder()
-		next.ServeHTTP(respRec, req)
+
+		// use the child request span context, so the handler will continue the child span for this request context
+		next.ServeHTTP(respRec, req.WithContext(reqCtx))
+
+		// create new span for this response span.
+		// response span MUST continue from parent span, because it's process is scoped in this middleware only.
+		var respSpan trace.Span
+		_, respSpan = l.tracer.Start(reqCtx, "Capture response")
 
 		var (
 			respBodyCaptured interface{}
@@ -156,12 +204,23 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		// append error if any
 		if errCum != nil {
 			accessLog.Error = errCum.Error()
+
+			respSpan.RecordError(errCum)
+			respSpan.SetStatus(codes.Error, "some error occurred during capturing log")
 		}
+
+		accessLog.ElapsedTime = time.Since(t0).Nanoseconds()
+
+		// write log here
+		l.logger.Access(parentCtx, l.msg, accessLog)
+
+		respSpan.End() // done response span
 	}
 
 	return http.HandlerFunc(fn)
 }
 
+// toSimpleMap converts http.Header which as array of string as value to simple string.
 func toSimpleMap(h http.Header) map[string]string {
 	out := map[string]string{}
 	for k, v := range h {
