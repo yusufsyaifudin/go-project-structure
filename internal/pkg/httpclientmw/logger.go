@@ -18,6 +18,10 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
+const (
+	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
+)
+
 type Opt func(*roundTripper) error
 
 // WithBaseRoundTripper replace base http.RoundTripper with new one.
@@ -58,37 +62,45 @@ func WithLogger(logger ylog.Logger) Opt {
 	}
 }
 
-// WithTracer set tracer instance to add span.
-func WithTracer(t trace.Tracer) Opt {
+// WithTracer set tracerProvider instance to add span.
+func WithTracer(t trace.TracerProvider) Opt {
 	return func(tripper *roundTripper) error {
 		if t == nil {
-			tripper.tracer = trace.NewNoopTracerProvider().Tracer("with_noop_tracer")
+			tripper.tracerProvider = trace.NewNoopTracerProvider()
 			return nil
 		}
 
-		tripper.tracer = t
+		tripper.tracerProvider = t
 		return nil
 	}
 }
 
 // roundTripper hold an implementation of http.RoundTripper
 type roundTripper struct {
-	base   http.RoundTripper
-	msg    string
-	logger ylog.Logger
-	tracer trace.Tracer
+	base           http.RoundTripper
+	msg            string
+	logger         ylog.Logger
+	tracerProvider trace.TracerProvider
+	tracer         trace.Tracer
 }
 
 var _ http.RoundTripper = (*roundTripper)(nil)
 
+func newTracer(tp trace.TracerProvider) trace.Tracer {
+	return tp.Tracer(instrumentationName)
+}
+
 // NewHttpRoundTripper return http.RoundTripper to be used as "middleware" in http.Client
 // to log any outgoing http request.
 func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
+	noopTracer := trace.NewNoopTracerProvider()
+
 	instance := &roundTripper{
-		base:   http.DefaultTransport,
-		msg:    "request logger",
-		logger: &ylog.Noop{},
-		tracer: trace.NewNoopTracerProvider().Tracer("noop_tracer"),
+		base:           http.DefaultTransport,
+		msg:            "request logger",
+		logger:         &ylog.Noop{},
+		tracerProvider: noopTracer,
+		tracer:         newTracer(noopTracer),
 	}
 
 	for _, opt := range opts {
@@ -98,10 +110,16 @@ func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
 		}
 	}
 
+	instance.applyConfig()
+
 	return instance
 }
 
-// RoundTrip do an http.RoundTrip and log the request/response body.
+func (r *roundTripper) applyConfig() {
+	r.tracer = newTracer(r.tracerProvider)
+}
+
+// RoundTrip do a http.RoundTrip and log the request/response body.
 func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	t0 := time.Now()
 

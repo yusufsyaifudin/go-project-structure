@@ -8,15 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
-
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -27,9 +24,11 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type Config struct {
@@ -44,6 +43,9 @@ func main() {
 	// systemCtx is context for system-wide process, it should not pass into HTTP or any Client process.
 	systemCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	buildCommitID := assets.BuildCommitID()
+	buildTime := assets.BuildTime()
 
 	// *** Parse and validate config input
 	cfg := Config{}
@@ -65,15 +67,6 @@ func main() {
 	logger := ylog.SetupZapLogger(cfg.LogLevel)
 
 	logger.Info(systemCtx, "trying to parse build time info")
-	serverBuildTime := strings.TrimSpace(strings.Trim(assets.BuildTime, "\n"))
-	buildTimeInt, err := strconv.Atoi(serverBuildTime)
-	if err != nil {
-		err = fmt.Errorf("BuildTime %+v variable not passed during build time: %w", assets.BuildTime, err)
-		logger.Error(systemCtx, err.Error())
-		return
-	}
-
-	buildTime := time.Unix(int64(buildTimeInt), 0)
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := otel.NewTracerExporter(cfg.OtelExporter,
@@ -116,7 +109,7 @@ func main() {
 	logger.Info(systemCtx, "preparing server http...")
 	var serverMux http.Handler
 	serverMux, err = restapi.NewHTTP(
-		restapi.WithBuildCommitID(assets.BuildCommitID),
+		restapi.WithBuildCommitID(buildCommitID),
 		restapi.WithBuildTime(buildTime),
 		restapi.WithStartupTime(time.Now()),
 		restapi.WithObservability(observeMgr),
@@ -127,8 +120,13 @@ func main() {
 		return
 	}
 
-	serverMux = httpservermw.OpenTelemetryMiddleware(serverMux,
-		httpservermw.OtelMwWithTracer(observeMgr.Tracer()),
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+
+	serverMux = otelhttp.NewHandler(serverMux,
+		assets.AppName+"_server",
+		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
+		otelhttp.WithPropagators(propagator),
+		otelhttp.WithTracerProvider(tracerProvider),
 	)
 
 	// add logger middleware

@@ -7,8 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
-
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/mitchellh/cli"
@@ -20,6 +18,7 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	pingcli "github.com/yusufsyaifudin/go-project-structure/cmd/cli/ping"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
@@ -79,14 +78,12 @@ func main() {
 		}
 	}()
 
-	tracer := tracerProvider.Tracer("cli")
-
 	c := cli.NewCLI(assets.AppName, "1.0.0")
 	c.Args = os.Args[1:]
 	c.Commands = map[string]cli.CommandFactory{
 		"ping": func() (cli.Command, error) {
 			return pingcli.NewCMD(
-				pingcli.WithTracer(tracer),
+				pingcli.WithTracer(tracerProvider),
 				pingcli.WithLogger(logger),
 			)
 		},

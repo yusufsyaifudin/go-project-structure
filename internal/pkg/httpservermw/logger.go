@@ -107,7 +107,7 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		reqCtx, reqSpan := l.tracer.Start(parentCtx, "Log middleware")
 		defer reqSpan.End()
 
-		_, captReqSpan := l.tracer.Start(reqCtx, "Capture request")
+		captReqCtx, captReqSpan := l.tracer.Start(reqCtx, "Capture request")
 		var (
 			errCum error // final cumulative error
 
@@ -139,9 +139,6 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 
 		// append to map only when the http.Request is not nil
 		if req != nil {
-			// extract from request header
-			reqCtx = propagator.Extract(reqCtx, propagation.HeaderCarrier(req.Header))
-
 			accessLog.Method = req.Method
 			accessLog.Host = req.URL.Host
 			accessLog.Path = req.URL.EscapedPath()
@@ -159,12 +156,13 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		respRec := httptest.NewRecorder()
 
 		// use the child request span context, so the handler will continue the child span for this request context
-		next.ServeHTTP(respRec, req.WithContext(reqCtx))
+		next.ServeHTTP(respRec, req.WithContext(captReqCtx))
 
 		// create new span for this response span.
 		// response span MUST continue from parent span, because it's process is scoped in this middleware only.
 		var respSpan trace.Span
 		_, respSpan = l.tracer.Start(reqCtx, "Capture response")
+		defer respSpan.End() // done response span
 
 		var (
 			respBodyCaptured interface{}
@@ -180,13 +178,17 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			respBodyCaptured = respBodyBuf.String()
 		}
 
+		// inject Traceparent to response recorder header,
+		// next it will write to actual writer response header
+		propagator.Inject(parentCtx, propagation.HeaderCarrier(respRec.Header()))
+
 		// append to map only when the http.Response is not nil
 		httpStatusCode := http.StatusInternalServerError
 		if respRec.Result() != nil {
 			httpStatusCode = respRec.Result().StatusCode
 			accessLog.Response = &ylog.HTTPData{
 				StatusCode: respRec.Result().StatusCode,
-				Header:     toSimpleMap(respRec.Result().Header),
+				Header:     toSimpleMap(respRec.Header()),
 				Body:       respBodyCaptured,
 			}
 		}
@@ -214,7 +216,6 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		// write log here
 		l.logger.Access(parentCtx, l.msg, accessLog)
 
-		respSpan.End() // done response span
 	}
 
 	return http.HandlerFunc(fn)

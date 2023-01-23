@@ -15,11 +15,17 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
+)
+
+const (
+	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/cmd/cli/ping"
 )
 
 type Opt func(*CMD) error
 
-func WithTracer(tracer trace.Tracer) Opt {
+func WithTracer(tracer trace.TracerProvider) Opt {
 	return func(cmd *CMD) error {
 		cmd.tracer = tracer
 		return nil
@@ -34,7 +40,7 @@ func WithLogger(log ylog.Logger) Opt {
 }
 
 type CMD struct {
-	tracer trace.Tracer
+	tracer trace.TracerProvider
 	logger ylog.Logger
 }
 
@@ -42,7 +48,7 @@ var _ cli.Command = (*CMD)(nil)
 
 func NewCMD(opts ...Opt) (*CMD, error) {
 	cmd := &CMD{
-		tracer: trace.NewNoopTracerProvider().Tracer("noop_tracer"),
+		tracer: trace.NewNoopTracerProvider(),
 		logger: &ylog.Noop{},
 	}
 
@@ -68,7 +74,9 @@ type Flag struct {
 // Example command: go run cmd/cli/main.go ping -s http://localhost:3001/
 func (c *CMD) Run(args []string) int {
 	ctx := context.Background()
-	ctx, span := c.tracer.Start(ctx, "Ping CLI Run")
+	tracer := c.tracer.Tracer(instrumentationName)
+
+	ctx, span := tracer.Start(ctx, "Ping CLI Run")
 	defer span.End()
 
 	var flag Flag
@@ -79,11 +87,24 @@ func (c *CMD) Run(args []string) int {
 		return 1
 	}
 
-	client := http.DefaultClient
-	client.Transport = httpclientmw.NewHttpRoundTripper(
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+
+	transport := http.DefaultTransport
+	transport = otelhttp.NewTransport(transport,
+		otelhttp.WithTracerProvider(c.tracer),
+		otelhttp.WithPropagators(propagator),
+		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+			return fmt.Sprintf("Request for %s %s", r.Method, r.URL.EscapedPath())
+		}),
+	)
+	transport = httpclientmw.NewHttpRoundTripper(
+		httpclientmw.WithBaseRoundTripper(transport),
 		httpclientmw.WithLogger(c.logger),
 		httpclientmw.WithTracer(c.tracer),
 	)
+
+	client := http.DefaultClient
+	client.Transport = transport
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(flag.Server, "/")+"/ping", nil)
 	if err != nil {
