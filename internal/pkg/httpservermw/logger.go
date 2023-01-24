@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel/propagation"
-
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/multierr"
 
@@ -24,11 +23,11 @@ const (
 	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 )
 
-type LoggerOpt func(*logMiddleware) error
+type LoggerOpt func(*LogMiddleware) error
 
 // LogMwWithMessage change message on logger.
 func LogMwWithMessage(msg string) LoggerOpt {
-	return func(tripper *logMiddleware) error {
+	return func(tripper *LogMiddleware) error {
 		tripper.msg = msg
 		return nil
 	}
@@ -36,9 +35,10 @@ func LogMwWithMessage(msg string) LoggerOpt {
 
 // LogMwWithLogger set logger
 func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
-	return func(tripper *logMiddleware) error {
+	return func(tripper *LogMiddleware) error {
 		if logger == nil {
-			return fmt.Errorf("cannot use nil instance of logger")
+			tripper.logger = ylog.NewNoop()
+			return nil
 		}
 
 		tripper.logger = logger
@@ -48,9 +48,10 @@ func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 
 // LogMwWithTracer set OpenTelemetry tracer provider instance to add span.
 func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
-	return func(tripper *logMiddleware) error {
+	return func(tripper *LogMiddleware) error {
 		if t == nil {
-			return fmt.Errorf("cannot use nil instance of OpenTelemetry tracer provider")
+			tripper.tracerProvider = trace.NewNoopTracerProvider()
+			return nil
 		}
 
 		tripper.tracerProvider = t
@@ -58,7 +59,7 @@ func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
 	}
 }
 
-type logMiddleware struct {
+type LogMiddleware struct {
 	msg            string
 	logger         ylog.Logger
 	tracerProvider trace.TracerProvider
@@ -66,7 +67,7 @@ type logMiddleware struct {
 
 // LoggingMiddleware is a middleware that logs incoming requests
 func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
-	l := &logMiddleware{
+	l := &LogMiddleware{
 		msg:            "request logger",
 		logger:         ylog.NewNoop(),
 		tracerProvider: trace.NewNoopTracerProvider(),
@@ -143,7 +144,7 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		if req != nil {
 			accessLog.Method = req.Method
 			accessLog.Request = &ylog.HTTPData{
-				Header: toSimpleMap(req.Header),
+				Header: HttpHeaderToSimpleMap(req.Header),
 				Body:   reqBodyCaptured,
 			}
 		}
@@ -193,17 +194,19 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			httpStatusCode = respRec.Result().StatusCode
 			accessLog.Response = &ylog.HTTPData{
 				StatusCode: respRec.Result().StatusCode,
-				Header:     toSimpleMap(respRec.Header()),
+				Header:     HttpHeaderToSimpleMap(respRec.Header()),
 				Body:       respBodyCaptured,
 			}
 		}
 
-		// write to actual
+		// write to actual response writer
 		for k, v := range respRec.Header() {
 			w.Header().Set(k, strings.Join(v, " "))
 		}
 
 		w.WriteHeader(httpStatusCode)
+
+		// write response body
 		if _, _err := w.Write(respBodyBuf.Bytes()); _err != nil {
 			errCum = multierr.Append(errCum, fmt.Errorf("failed to write to actual response writer: %w", _err))
 		}
@@ -226,8 +229,8 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-// toSimpleMap converts http.Header which as array of string as value to simple string.
-func toSimpleMap(h http.Header) map[string]string {
+// HttpHeaderToSimpleMap converts http.Header which as array of string as value to simple string.
+func HttpHeaderToSimpleMap(h http.Header) map[string]string {
 	out := map[string]string{}
 	for k, v := range h {
 		out[k] = strings.Join(v, " ")

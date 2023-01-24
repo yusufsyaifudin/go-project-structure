@@ -354,6 +354,8 @@ type buf struct {
 	err error
 }
 
+var _ io.Reader = (*buf)(nil)
+
 func newBuf(err error) io.Reader {
 	return &buf{
 		err: err,
@@ -373,14 +375,14 @@ type closer struct {
 	err error
 }
 
+var _ io.ReadCloser = (*closer)(nil)
+
 func newCloser(buf io.Reader, err error) *closer {
 	return &closer{
 		buf: buf,
 		err: err,
 	}
 }
-
-var _ io.ReadCloser = (*closer)(nil)
 
 func (c *closer) Read(p []byte) (n int, err error) {
 	return c.buf.Read(p)
