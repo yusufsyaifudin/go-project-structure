@@ -218,8 +218,6 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// append to map only when the http.Request is not nil
 	if req != nil {
 		accessLog.Method = req.Method
-		accessLog.Host = "empty.host"
-		accessLog.Path = "empty-path"
 		accessLog.Request = &ylog.HTTPData{
 			Header: toSimpleMap(req.Header),
 			Body:   reqBodyCaptured,

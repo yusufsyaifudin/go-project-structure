@@ -26,22 +26,19 @@ const (
 
 type LoggerOpt func(*logMiddleware) error
 
+// LogMwWithMessage change message on logger.
 func LogMwWithMessage(msg string) LoggerOpt {
 	return func(tripper *logMiddleware) error {
-		if msg == "" {
-			return nil
-		}
-
 		tripper.msg = msg
 		return nil
 	}
 }
 
+// LogMwWithLogger set logger
 func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if logger == nil {
-			tripper.logger = ylog.NewNoop()
-			return nil
+			return fmt.Errorf("cannot use nil instance of logger")
 		}
 
 		tripper.logger = logger
@@ -49,12 +46,11 @@ func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	}
 }
 
-// LogMwWithTracer set tracerProvider instance to add span.
+// LogMwWithTracer set OpenTelemetry tracer provider instance to add span.
 func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if t == nil {
-			tripper.tracerProvider = trace.NewNoopTracerProvider()
-			return nil
+			return fmt.Errorf("cannot use nil instance of OpenTelemetry tracer provider")
 		}
 
 		tripper.tracerProvider = t
@@ -146,12 +142,15 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		// append to map only when the http.Request is not nil
 		if req != nil {
 			accessLog.Method = req.Method
-			accessLog.Host = req.URL.Host
-			accessLog.Path = req.URL.EscapedPath()
 			accessLog.Request = &ylog.HTTPData{
 				Header: toSimpleMap(req.Header),
 				Body:   reqBodyCaptured,
 			}
+		}
+
+		if req != nil && req.URL != nil {
+			accessLog.Host = req.URL.Host
+			accessLog.Path = req.URL.EscapedPath()
 		}
 
 		// ending the capture request span right before we do actual ServeHTTP.

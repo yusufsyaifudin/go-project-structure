@@ -13,7 +13,9 @@ type Zap struct {
 var _ Logger = (*Zap)(nil)
 
 func NewZap(zapLogger *zap.Logger) *Zap {
-	return &Zap{writer: zapLogger}
+	return &Zap{
+		writer: zapLogger,
+	}
 }
 
 func (z *Zap) Debug(ctx context.Context, msg string, fields ...KeyValue) {
