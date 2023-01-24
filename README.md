@@ -4,7 +4,7 @@
 
 * [x] Kubernetes YAML file
 * [x] Config from environment variable and .env
-* [ ] Included MongoDB
+* [x] OpenTelemetry tracing
 
 
 ## Setup
