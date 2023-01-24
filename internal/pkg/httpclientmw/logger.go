@@ -27,7 +27,7 @@ type Opt func(*roundTripper) error
 // WithBaseRoundTripper replace base http.RoundTripper with new one.
 func WithBaseRoundTripper(h http.RoundTripper) Opt {
 	return func(tripper *roundTripper) error {
-		if tripper == nil {
+		if h == nil {
 			tripper.base = http.DefaultTransport
 			return nil
 		}
@@ -144,8 +144,7 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	var (
-		respOriginal *http.Response // final response
-		errCum       error          // final error
+		errCum error // final error
 
 		reqBodyBuf      = &bytes.Buffer{}
 		reqBodyErr      error
@@ -172,8 +171,17 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		reqBodyCaptured = reqBodyBuf.String()
 	}
 
-	var roundTripErr error
-	respOriginal, roundTripErr = r.base.RoundTrip(req.WithContext(parentCtx))
+	var (
+		respOriginal *http.Response // round trip response
+		roundTripErr error          // round trip error
+	)
+
+	if req != nil {
+		respOriginal, roundTripErr = r.base.RoundTrip(req.WithContext(parentCtx))
+	} else {
+		roundTripErr = fmt.Errorf("cannot do round-tripper request because *http.Request is nil")
+	}
+
 	if roundTripErr != nil {
 		errCum = multierr.Append(errCum, fmt.Errorf("error doing actual request: %w", roundTripErr))
 	}
@@ -210,12 +218,17 @@ func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// append to map only when the http.Request is not nil
 	if req != nil {
 		accessLog.Method = req.Method
-		accessLog.Host = req.URL.Host
-		accessLog.Path = req.URL.EscapedPath()
+		accessLog.Host = "empty.host"
+		accessLog.Path = "empty-path"
 		accessLog.Request = &ylog.HTTPData{
 			Header: toSimpleMap(req.Header),
 			Body:   reqBodyCaptured,
 		}
+	}
+
+	if req != nil && req.URL != nil {
+		accessLog.Host = req.URL.Host
+		accessLog.Path = req.URL.EscapedPath()
 	}
 
 	// append to map only when the http.Response is not nil
