@@ -36,24 +36,28 @@ func WithTracerProvider(provider trace.TracerProvider) Opt {
 			return nil
 		}
 
-		manager.tracer = provider
+		manager.tracerProvider = provider
 		return nil
 	}
 }
 
 type Manager struct {
-	logger     ylog.Logger
-	tracerName string
-	tracer     trace.TracerProvider
+	logger         ylog.Logger
+	tracerName     string
+	tracerProvider trace.TracerProvider
+	tracer         trace.Tracer
 }
 
 var _ Observability = (*Manager)(nil)
 
 func NewManager(opts ...Opt) (*Manager, error) {
+
+	tp := trace.NewNoopTracerProvider()
 	mgr := &Manager{
-		logger:     &ylog.Noop{},
-		tracerName: "default_tracer",
-		tracer:     trace.NewNoopTracerProvider(),
+		logger:         &ylog.Noop{},
+		tracerName:     "default_tracer",
+		tracerProvider: tp,
+		tracer:         tp.Tracer(instrumentationName),
 	}
 
 	for _, opt := range opts {
@@ -63,6 +67,9 @@ func NewManager(opts ...Opt) (*Manager, error) {
 		}
 	}
 
+	// prepare tracer with injected tracer provider
+	mgr.tracer = mgr.tracerProvider.Tracer(instrumentationName)
+
 	return mgr, nil
 }
 
@@ -71,5 +78,5 @@ func (m *Manager) Logger() ylog.Logger {
 }
 
 func (m *Manager) Tracer() trace.Tracer {
-	return m.tracer.Tracer(m.tracerName)
+	return m.tracer
 }

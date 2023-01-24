@@ -1,4 +1,4 @@
-package otel
+package oteltracer
 
 import (
 	"context"
@@ -17,9 +17,9 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
-type ExpOpt func(*expOption) error
+type ExporterOpt func(*expOption) error
 
-func WithContext(ctx context.Context) ExpOpt {
+func WithContext(ctx context.Context) ExporterOpt {
 	return func(option *expOption) error {
 		if ctx == nil {
 			return nil
@@ -30,7 +30,7 @@ func WithContext(ctx context.Context) ExpOpt {
 	}
 }
 
-func WithLogger(logger ylog.Logger) ExpOpt {
+func WithLogger(logger ylog.Logger) ExporterOpt {
 	return func(option *expOption) error {
 		if logger == nil {
 			return nil
@@ -41,7 +41,7 @@ func WithLogger(logger ylog.Logger) ExpOpt {
 	}
 }
 
-func WithJaegerEndpoint(endpoint string) ExpOpt {
+func WithJaegerEndpoint(endpoint string) ExporterOpt {
 	return func(option *expOption) error {
 		if endpoint == "" {
 			return nil
@@ -52,7 +52,7 @@ func WithJaegerEndpoint(endpoint string) ExpOpt {
 	}
 }
 
-func WithOTLPEndpoint(endpoint string) ExpOpt {
+func WithOTLPEndpoint(endpoint string) ExporterOpt {
 	return func(option *expOption) error {
 		if endpoint == "" {
 			return nil
@@ -72,7 +72,7 @@ type expOption struct {
 
 // NewTracerExporter select the tracer span exporter based on name.
 // Default to noop exporter if no name or NOOP specified.
-func NewTracerExporter(name string, opts ...ExpOpt) (trace.SpanExporter, error) {
+func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, error) {
 	cfg := &expOption{
 		ctx:    context.Background(),
 		logger: &ylog.Noop{},

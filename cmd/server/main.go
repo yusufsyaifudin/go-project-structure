@@ -24,7 +24,7 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
@@ -69,11 +69,11 @@ func main() {
 	logger.Info(systemCtx, "trying to parse build time info")
 
 	// prepare tracer exporter, whether using stdout or jaeger
-	tracerExporter, tracerExporterErr := otel.NewTracerExporter(cfg.OtelExporter,
-		otel.WithContext(systemCtx),
-		otel.WithLogger(logger),
-		otel.WithJaegerEndpoint(cfg.OtelJaegerURL),
-		otel.WithOTLPEndpoint(cfg.OtelOtlpURL),
+	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
+		oteltracer.WithContext(systemCtx),
+		oteltracer.WithLogger(logger),
+		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
+		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)
 
 	if tracerExporterErr != nil {
@@ -131,9 +131,9 @@ func main() {
 
 	// add logger middleware
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
-		httpservermw.LogMwWithLogger(observeMgr.Logger()),
+		httpservermw.LogMwWithLogger(logger),
 		httpservermw.LogMwWithMessage("incoming request log"),
-		httpservermw.LogMwWithTracer(observeMgr.Tracer()),
+		httpservermw.LogMwWithTracer(tracerProvider),
 	)
 
 	httpPortStr := fmt.Sprintf(":%d", cfg.HTTPPort)

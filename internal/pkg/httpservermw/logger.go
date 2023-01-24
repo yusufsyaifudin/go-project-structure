@@ -20,6 +20,10 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
+const (
+	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
+)
+
 type LoggerOpt func(*logMiddleware) error
 
 func LogMwWithMessage(msg string) LoggerOpt {
@@ -45,31 +49,31 @@ func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	}
 }
 
-// LogMwWithTracer set tracer instance to add span.
-func LogMwWithTracer(t trace.Tracer) LoggerOpt {
+// LogMwWithTracer set tracerProvider instance to add span.
+func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if t == nil {
-			tripper.tracer = trace.NewNoopTracerProvider().Tracer("with_noop_tracer")
+			tripper.tracerProvider = trace.NewNoopTracerProvider()
 			return nil
 		}
 
-		tripper.tracer = t
+		tripper.tracerProvider = t
 		return nil
 	}
 }
 
 type logMiddleware struct {
-	msg    string
-	logger ylog.Logger
-	tracer trace.Tracer
+	msg            string
+	logger         ylog.Logger
+	tracerProvider trace.TracerProvider
 }
 
 // LoggingMiddleware is a middleware that logs incoming requests
 func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &logMiddleware{
-		msg:    "request logger",
-		logger: &ylog.Noop{},
-		tracer: trace.NewNoopTracerProvider().Tracer("noop_tracer"),
+		msg:            "request logger",
+		logger:         &ylog.Noop{},
+		tracerProvider: trace.NewNoopTracerProvider(),
 	}
 
 	for _, opt := range opts {
@@ -78,6 +82,8 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			panic(err)
 		}
 	}
+
+	tracer := l.tracerProvider.Tracer(instrumentationName)
 
 	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
@@ -99,15 +105,15 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		}
 
 		var parentSpan trace.Span
-		parentCtx, parentSpan = l.tracer.Start(parentCtx, spanName)
+		parentCtx, parentSpan = tracer.Start(parentCtx, spanName)
 		defer parentSpan.End()
 
 		// create child span for this request and pass it to the actual handler span.
 		// this span will end after this middleware function call done.
-		reqCtx, reqSpan := l.tracer.Start(parentCtx, "Log middleware")
+		reqCtx, reqSpan := tracer.Start(parentCtx, "Log middleware")
 		defer reqSpan.End()
 
-		captReqCtx, captReqSpan := l.tracer.Start(reqCtx, "Capture request")
+		captReqCtx, captReqSpan := tracer.Start(reqCtx, "Capture request")
 		var (
 			errCum error // final cumulative error
 
@@ -161,7 +167,7 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		// create new span for this response span.
 		// response span MUST continue from parent span, because it's process is scoped in this middleware only.
 		var respSpan trace.Span
-		_, respSpan = l.tracer.Start(reqCtx, "Capture response")
+		_, respSpan = tracer.Start(reqCtx, "Capture response")
 		defer respSpan.End() // done response span
 
 		var (

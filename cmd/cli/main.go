@@ -18,7 +18,7 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	pingcli "github.com/yusufsyaifudin/go-project-structure/cmd/cli/ping"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/otel"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
@@ -52,11 +52,11 @@ func main() {
 	var tracerExporter trace.SpanExporter
 	var tracerErr error
 	// prepare tracer exporter, whether using stdout or jaeger
-	tracerExporter, tracerErr = otel.NewTracerExporter(cfg.OtelExporter,
-		otel.WithContext(systemCtx),
-		otel.WithLogger(logger),
-		otel.WithJaegerEndpoint(cfg.OtelJaegerURL),
-		otel.WithOTLPEndpoint(cfg.OtelOtlpURL),
+	tracerExporter, tracerErr = oteltracer.NewTracerExporter(cfg.OtelExporter,
+		oteltracer.WithContext(systemCtx),
+		oteltracer.WithLogger(logger),
+		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
+		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)
 	if tracerErr != nil {
 		tracerExporter = tracetest.NewNoopExporter()
