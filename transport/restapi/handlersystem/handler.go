@@ -66,6 +66,11 @@ func New(opts ...Opt) (*SystemHandler, error) {
 	return systemHandler, nil
 }
 
+func (s *SystemHandler) Router(e *echo.Echo) {
+	e.GET("/ping", s.Ping)
+	e.GET("/system-info", s.SystemInfo)
+}
+
 type PingResp struct {
 	CommitHash   string    `json:"commit_hash,omitempty"`
 	BuildTime    time.Time `json:"build_time,omitempty"`

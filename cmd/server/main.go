@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
+
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -102,14 +104,31 @@ func main() {
 		return
 	}
 
+	startupTime := time.Now()
+
+	// prepare handler system for ping and system info routes.
+	handlerSystem, err := handlersystem.New(
+		handlersystem.WithBuildCommitID(buildCommitID),
+		handlersystem.WithBuildTime(buildTime),
+		handlersystem.WithStartupTime(startupTime),
+		handlersystem.WithObservability(observeMgr),
+	)
+	if err != nil {
+		logger.Error(systemCtx, "cannot prepare http handler for system router", ylog.KV("error", err))
+		return
+	}
+
 	// ** setup server with graceful shutdown
 	logger.Info(systemCtx, "preparing server http...")
 	var serverMux http.Handler
 	serverMux, err = restapi.NewHTTP(
 		restapi.WithBuildCommitID(buildCommitID),
 		restapi.WithBuildTime(buildTime),
-		restapi.WithStartupTime(time.Now()),
+		restapi.WithStartupTime(startupTime),
 		restapi.WithObservability(observeMgr),
+
+		// register all handler here
+		restapi.AddHandler(handlerSystem),
 	)
 	if err != nil {
 		err = fmt.Errorf("error prepare rest api server: %w", err)

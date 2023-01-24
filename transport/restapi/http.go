@@ -14,11 +14,11 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
-	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
 type HTTPConfig func(*HTTP) error
 
+// WithBuildCommitID add build commit id info
 func WithBuildCommitID(hash string) HTTPConfig {
 	return func(h *HTTP) error {
 		h.buildCommitID = hash
@@ -26,6 +26,7 @@ func WithBuildCommitID(hash string) HTTPConfig {
 	}
 }
 
+// WithBuildTime add build time info
 func WithBuildTime(t time.Time) HTTPConfig {
 	return func(h *HTTP) error {
 		h.buildTime = t
@@ -33,6 +34,7 @@ func WithBuildTime(t time.Time) HTTPConfig {
 	}
 }
 
+// WithStartupTime add startup time info
 func WithStartupTime(t time.Time) HTTPConfig {
 	return func(h *HTTP) error {
 		h.startupTime = t
@@ -40,6 +42,7 @@ func WithStartupTime(t time.Time) HTTPConfig {
 	}
 }
 
+// WithObservability add observability manager
 func WithObservability(o observability.Observability) HTTPConfig {
 	return func(h *HTTP) error {
 		if o == nil {
@@ -51,17 +54,39 @@ func WithObservability(o observability.Observability) HTTPConfig {
 	}
 }
 
+// AddHandler register the handler that implements EchoRouter.
+func AddHandler(r EchoRouter) HTTPConfig {
+	return func(h *HTTP) error {
+		if r == nil {
+			return nil
+		}
+
+		h.handlers = append(h.handlers, r)
+		return nil
+	}
+}
+
+// EchoRouter is contract to register echo router.
+// All router added into Router will be added.
+// Please keep in mind that if you register the same path into echo instance,
+// the latest registered path will be used.
+type EchoRouter interface {
+	Router(e *echo.Echo)
+}
+
 type HTTP struct {
 	buildCommitID string                      `validate:"-"`
 	buildTime     time.Time                   `validate:"-"`
 	startupTime   time.Time                   `validate:"required"`
 	observability observability.Observability `validate:"required"`
+	handlers      []EchoRouter
 
 	echo *echo.Echo
 }
 
 var _ http.Handler = (*HTTP)(nil)
 
+// NewHTTP implements http.Handler using echo as router.
 func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 	e := echo.New()
 	e.Use(
@@ -74,6 +99,7 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 		buildTime:     time.Now(),
 		startupTime:   time.Now(),
 		observability: observability.NewNoop(),
+		handlers:      make([]EchoRouter, 0),
 		echo:          e,
 	}
 
@@ -92,20 +118,10 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 
 	e.HTTPErrorHandler = h.httpErrorHandler
 
-	// Prepare all handler
-	handlerSystem, err := handlersystem.New(
-		handlersystem.WithBuildCommitID(h.buildCommitID),
-		handlersystem.WithBuildTime(h.buildTime),
-		handlersystem.WithStartupTime(h.startupTime),
-		handlersystem.WithObservability(h.observability),
-	)
-	if err != nil {
-		return nil, err
+	// register all handler
+	for _, handler := range h.handlers {
+		handler.Router(e)
 	}
-
-	// Register all routes
-	e.GET("/ping", handlerSystem.Ping)
-	e.GET("/system-info", handlerSystem.SystemInfo)
 
 	return h, nil
 }
