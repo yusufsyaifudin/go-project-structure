@@ -11,6 +11,7 @@ const (
 	typeSys       logType = "sys"
 )
 
+// Logger is an logger contract with level and context passing.
 type Logger interface {
 	Debug(ctx context.Context, msg string, fields ...KeyValue)
 	Info(ctx context.Context, msg string, fields ...KeyValue)

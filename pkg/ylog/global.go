@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// SetupZapLogger setup the Logger with Uber Zap logger with specific level.
+// Default using DEBUG level if unknown level specified.
 func SetupZapLogger(level string) Logger {
 	zapLevel := zapcore.DebugLevel
 	switch strings.ToUpper(level) {

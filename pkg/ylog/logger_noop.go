@@ -2,24 +2,24 @@ package ylog
 
 import "context"
 
-type noop struct{}
+type Noop struct{}
 
-func NewNoop() *noop {
-	return &noop{}
+func NewNoop() *Noop {
+	return &Noop{}
 }
 
-var _ Logger = (*noop)(nil)
+var _ Logger = (*Noop)(nil)
 
-func (n *noop) Debug(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Debug(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Info(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Info(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Warn(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Warn(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Error(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Error(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Panic(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Panic(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Fatal(ctx context.Context, msg string, fields ...KeyValue) {}
+func (n *Noop) Fatal(ctx context.Context, msg string, fields ...KeyValue) {}
 
-func (n *noop) Access(ctx context.Context, msg string, data AccessLogData) {}
+func (n *Noop) Access(ctx context.Context, msg string, data AccessLogData) {}
