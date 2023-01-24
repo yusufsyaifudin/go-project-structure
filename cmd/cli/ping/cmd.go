@@ -49,7 +49,7 @@ var _ cli.Command = (*CMD)(nil)
 func NewCMD(opts ...Opt) (*CMD, error) {
 	cmd := &CMD{
 		tracer: trace.NewNoopTracerProvider(),
-		logger: &ylog.Noop{},
+		logger: ylog.NewNoop(),
 	}
 
 	for _, opt := range opts {

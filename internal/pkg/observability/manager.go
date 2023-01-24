@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"fmt"
+
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
@@ -8,10 +10,11 @@ import (
 
 type Opt func(*Manager) error
 
+// WithLogger set logger instance for the system observability.
 func WithLogger(log ylog.Logger) Opt {
 	return func(manager *Manager) error {
 		if log == nil {
-			return nil
+			return fmt.Errorf("cannot use nil logger")
 		}
 
 		manager.logger = log
@@ -19,21 +22,11 @@ func WithLogger(log ylog.Logger) Opt {
 	}
 }
 
-func WithTracerName(name string) Opt {
-	return func(manager *Manager) error {
-		if name == "" {
-			return nil
-		}
-
-		manager.tracerName = name
-		return nil
-	}
-}
-
+// WithTracerProvider set OpenTelemetry tracer provider.
 func WithTracerProvider(provider trace.TracerProvider) Opt {
 	return func(manager *Manager) error {
 		if provider == nil {
-			return nil
+			return fmt.Errorf("cannot use nil tracer provider")
 		}
 
 		manager.tracerProvider = provider
@@ -43,19 +36,18 @@ func WithTracerProvider(provider trace.TracerProvider) Opt {
 
 type Manager struct {
 	logger         ylog.Logger
-	tracerName     string
 	tracerProvider trace.TracerProvider
 	tracer         trace.Tracer
 }
 
 var _ Observability = (*Manager)(nil)
 
+// NewManager return Observability
 func NewManager(opts ...Opt) (*Manager, error) {
 
 	tp := trace.NewNoopTracerProvider()
 	mgr := &Manager{
-		logger:         &ylog.Noop{},
-		tracerName:     "default_tracer",
+		logger:         ylog.NewNoop(),
 		tracerProvider: tp,
 		tracer:         tp.Tracer(instrumentationName),
 	}

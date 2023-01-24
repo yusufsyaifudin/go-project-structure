@@ -70,7 +70,6 @@ func main() {
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithContext(systemCtx),
 		oteltracer.WithLogger(logger),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
@@ -94,10 +93,8 @@ func main() {
 		}
 	}()
 
-	const tracerName = "myapp-tracer"
 	observeMgr, err := observability.NewManager(
 		observability.WithLogger(logger),
-		observability.WithTracerName(tracerName),
 		observability.WithTracerProvider(tracerProvider),
 	)
 	if err != nil {

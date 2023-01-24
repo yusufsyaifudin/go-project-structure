@@ -20,7 +20,7 @@ var noopTracer = trace.NewNoopTracerProvider()
 var roundTripperInstance = &roundTripper{
 	base:           http.DefaultTransport,
 	msg:            "request logger",
-	logger:         &ylog.Noop{},
+	logger:         ylog.NewNoop(),
 	tracerProvider: noopTracer,
 	tracer:         noopTracer.Tracer(instrumentationName),
 }
@@ -61,7 +61,7 @@ func TestWithLogger(t *testing.T) {
 	})
 
 	t.Run("on non-nil", func(t *testing.T) {
-		opt := WithLogger(&ylog.Noop{})
+		opt := WithLogger(ylog.NewNoop())
 		err := opt(roundTripperInstance)
 		assert.NoError(t, err)
 	})

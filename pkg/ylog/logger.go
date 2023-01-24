@@ -4,11 +4,11 @@ import (
 	"context"
 )
 
-type LogType string
+type logType string
 
 const (
-	TypeAccessLog LogType = "access_log"
-	TypeSys       LogType = "sys"
+	typeAccessLog logType = "access_log"
+	typeSys       logType = "sys"
 )
 
 type Logger interface {
@@ -21,23 +21,10 @@ type Logger interface {
 	Access(ctx context.Context, msg string, data AccessLogData)
 }
 
-type Noop struct{}
-
-var _ Logger = (*Noop)(nil)
-
-func (n *Noop) Debug(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Info(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Warn(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Error(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Panic(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Fatal(ctx context.Context, msg string, fields ...KeyValue) {}
-
-func (n *Noop) Access(ctx context.Context, msg string, data AccessLogData) {}
+type KeyValue interface {
+	Key() string
+	Value() any
+}
 
 type HTTPData struct {
 	StatusCode int               `json:"statusCode,omitempty"`
@@ -53,31 +40,4 @@ type AccessLogData struct {
 	Response    *HTTPData `json:"response,omitempty"`
 	Error       string    `json:"error,omitempty"`
 	ElapsedTime int64     `json:"elapsedTime,omitempty"`
-}
-
-type KeyValue interface {
-	Key() string
-	Value() any
-}
-
-type kv struct {
-	k string
-	v any
-}
-
-func (k *kv) Key() string {
-	return k.k
-}
-
-func (k *kv) Value() any {
-	return k.v
-}
-
-var _ KeyValue = (*kv)(nil)
-
-func KV(k string, v interface{}) KeyValue {
-	return &kv{
-		k: k,
-		v: v,
-	}
 }

@@ -2,9 +2,7 @@ package oteltracer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
 	"go.opentelemetry.io/otel/exporters/jaeger"
@@ -17,23 +15,14 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
-type ExporterOpt func(*expOption) error
+type ExporterOpt func(*ExporterOption) error
 
-func WithContext(ctx context.Context) ExporterOpt {
-	return func(option *expOption) error {
-		if ctx == nil {
-			return nil
-		}
-
-		option.ctx = ctx
-		return nil
-	}
-}
-
+// WithLogger set logger instance for the STDOUT span exporter.
+// Context must be injected in order to
 func WithLogger(logger ylog.Logger) ExporterOpt {
-	return func(option *expOption) error {
+	return func(option *ExporterOption) error {
 		if logger == nil {
-			return nil
+			return fmt.Errorf("cannot use nil logger")
 		}
 
 		option.logger = logger
@@ -41,30 +30,25 @@ func WithLogger(logger ylog.Logger) ExporterOpt {
 	}
 }
 
+// WithJaegerEndpoint set Jaeger endpoint for type JAEGER span exporter.
+// Default to http://localhost:14268/api/traces
 func WithJaegerEndpoint(endpoint string) ExporterOpt {
-	return func(option *expOption) error {
-		if endpoint == "" {
-			return nil
-		}
-
+	return func(option *ExporterOption) error {
 		option.jaegerEndpoint = endpoint
 		return nil
 	}
 }
 
+// WithOTLPEndpoint set OpenTelemetry endpoint collector for type OTLP span exporter.
+// Default to localhost:4318
 func WithOTLPEndpoint(endpoint string) ExporterOpt {
-	return func(option *expOption) error {
-		if endpoint == "" {
-			return nil
-		}
-
+	return func(option *ExporterOption) error {
 		option.otlpEndpoint = endpoint
 		return nil
 	}
 }
 
-type expOption struct {
-	ctx            context.Context
+type ExporterOption struct {
 	logger         ylog.Logger
 	jaegerEndpoint string
 	otlpEndpoint   string
@@ -73,9 +57,10 @@ type expOption struct {
 // NewTracerExporter select the tracer span exporter based on name.
 // Default to noop exporter if no name or NOOP specified.
 func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, error) {
-	cfg := &expOption{
-		ctx:    context.Background(),
-		logger: &ylog.Noop{},
+	cfg := &ExporterOption{
+		logger:         ylog.NewNoop(),
+		jaegerEndpoint: "http://localhost:14268/api/traces",
+		otlpEndpoint:   "localhost:4318",
 	}
 
 	for _, opt := range opts {
@@ -103,7 +88,7 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 		}
 
 		return otlptrace.New(
-			cfg.ctx,
+			context.Background(),
 			otlptracehttp.NewClient(
 				otlptracehttp.WithInsecure(),
 				otlptracehttp.WithEndpoint(endpoint),
@@ -112,7 +97,7 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 
 	case "STDOUT":
 		return stdouttrace.New(
-			stdouttrace.WithWriter(debugWriter(cfg.ctx, cfg.logger)),
+			stdouttrace.WithWriter(ylog.WrapIOWriter(cfg.logger)),
 			// Use human-readable output.
 			stdouttrace.WithPrettyPrint(),
 			// Do not print timestamps for the demo.
@@ -123,35 +108,5 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 		return tracetest.NewNoopExporter(), nil
 	default:
 		return nil, fmt.Errorf("unknown name='%s' for OpenTelemetry span exporter", name)
-	}
-}
-
-// loggerIOWriter wrap ylog.Logger as io.Writer
-type loggerIOWriter struct {
-	ctx    context.Context
-	logger ylog.Logger
-}
-
-var _ io.Writer = (*loggerIOWriter)(nil)
-
-// Write writes p as debug log using ylog.Logger.
-// Since p may contain valid JSON object, we try to convert it as native Go object.
-// Because if we write p directly to logger, it will print as Base64 encoded string.
-// As a penalty, it may require some computation that not actually needed only to print the formatted JSON.
-func (l *loggerIOWriter) Write(p []byte) (n int, err error) {
-	var jsonObj interface{}
-	if json.Unmarshal(p, &jsonObj) != nil {
-		jsonObj = string(p)
-	}
-
-	l.logger.Debug(l.ctx, "tracer log", ylog.KV("data", jsonObj))
-	return len(p), nil
-}
-
-// debugWriter wrap ylog.Logger as io.Writer with context.Context
-func debugWriter(ctx context.Context, logger ylog.Logger) io.Writer {
-	return &loggerIOWriter{
-		ctx:    ctx,
-		logger: logger,
 	}
 }

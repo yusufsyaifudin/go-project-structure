@@ -42,3 +42,26 @@ func SetupZapLogger(level string) Logger {
 	log := zap.New(core)
 	return NewZap(log)
 }
+
+type kv struct {
+	k string
+	v any
+}
+
+var _ KeyValue = (*kv)(nil)
+
+// KV implements KeyValue interface that hold additional tag for the logger.
+func KV(k string, v interface{}) KeyValue {
+	return &kv{
+		k: k,
+		v: v,
+	}
+}
+
+func (k *kv) Key() string {
+	return k.k
+}
+
+func (k *kv) Value() any {
+	return k.v
+}

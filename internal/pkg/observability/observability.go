@@ -21,12 +21,13 @@ type Noop struct{}
 
 var _ Observability = (*Noop)(nil)
 
+// NewNoop return no-op Observability
 func NewNoop() *Noop {
 	return &Noop{}
 }
 
 func (n *Noop) Logger() ylog.Logger {
-	return &ylog.Noop{}
+	return ylog.NewNoop()
 }
 
 func (n *Noop) Tracer() trace.Tracer {

@@ -53,7 +53,7 @@ func WithMessage(msg string) Opt {
 func WithLogger(logger ylog.Logger) Opt {
 	return func(tripper *roundTripper) error {
 		if logger == nil {
-			tripper.logger = &ylog.Noop{}
+			tripper.logger = ylog.NewNoop()
 			return nil
 		}
 
@@ -98,7 +98,7 @@ func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
 	instance := &roundTripper{
 		base:           http.DefaultTransport,
 		msg:            "request logger",
-		logger:         &ylog.Noop{},
+		logger:         ylog.NewNoop(),
 		tracerProvider: noopTracer,
 		tracer:         newTracer(noopTracer),
 	}

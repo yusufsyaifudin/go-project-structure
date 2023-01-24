@@ -17,34 +17,34 @@ func NewZap(zapLogger *zap.Logger) *Zap {
 }
 
 func (z *Zap) Debug(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Debug(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Debug(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Info(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Info(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Info(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Warn(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Warn(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Warn(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Error(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Error(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Error(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Panic(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Panic(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Panic(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Fatal(ctx context.Context, msg string, fields ...KeyValue) {
-	z.writer.Fatal(msg, localFieldZapFields(ctx, TypeSys, fields)...)
+	z.writer.Fatal(msg, localFieldZapFields(ctx, typeSys, fields)...)
 }
 
 func (z *Zap) Access(ctx context.Context, msg string, data AccessLogData) {
-	z.writer.Info(msg, localFieldZapFields(ctx, TypeAccessLog, []KeyValue{KV("data", data)})...)
+	z.writer.Info(msg, localFieldZapFields(ctx, typeAccessLog, []KeyValue{KV("data", data)})...)
 }
 
-func localFieldZapFields(ctx context.Context, logType LogType, fields []KeyValue) []zap.Field {
+func localFieldZapFields(ctx context.Context, logType logType, fields []KeyValue) []zap.Field {
 	zapFields := make([]zap.Field, 0)
 	zapFields = append(zapFields, zap.String("log_type", string(logType)))
 
@@ -54,5 +54,3 @@ func localFieldZapFields(ctx context.Context, logType LogType, fields []KeyValue
 
 	return zapFields
 }
-
-var _ Logger = (*Zap)(nil)

@@ -53,7 +53,6 @@ func main() {
 	var tracerErr error
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerErr = oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithContext(systemCtx),
 		oteltracer.WithLogger(logger),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),

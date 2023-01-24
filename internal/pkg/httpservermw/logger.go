@@ -40,7 +40,7 @@ func LogMwWithMessage(msg string) LoggerOpt {
 func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 	return func(tripper *logMiddleware) error {
 		if logger == nil {
-			tripper.logger = &ylog.Noop{}
+			tripper.logger = ylog.NewNoop()
 			return nil
 		}
 
@@ -72,7 +72,7 @@ type logMiddleware struct {
 func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &logMiddleware{
 		msg:            "request logger",
-		logger:         &ylog.Noop{},
+		logger:         ylog.NewNoop(),
 		tracerProvider: trace.NewNoopTracerProvider(),
 	}
 
