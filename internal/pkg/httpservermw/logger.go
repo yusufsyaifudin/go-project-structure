@@ -25,6 +25,13 @@ const (
 
 type LoggerOpt func(*LogMiddleware) error
 
+// Filter is a predicate used to determine whether a given http.request should
+// be logged. A Filter must return true if the request should be traced.
+// Don't change any value in request.
+// If Filter return false, then it should be skipped.
+// Otherwise, if return true, it will be included in log.
+type Filter func(*http.Request) bool
+
 // LogMwWithMessage change message on logger.
 func LogMwWithMessage(msg string) LoggerOpt {
 	return func(tripper *LogMiddleware) error {
@@ -59,10 +66,19 @@ func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
 	}
 }
 
+// LogMwWithFilter filter out what route that don't want to be logged
+func LogMwWithFilter(f Filter) LoggerOpt {
+	return func(tripper *LogMiddleware) error {
+		tripper.filter = f
+		return nil
+	}
+}
+
 type LogMiddleware struct {
 	msg            string
 	logger         ylog.Logger
 	tracerProvider trace.TracerProvider
+	filter         Filter
 }
 
 // LoggingMiddleware is a middleware that logs incoming requests
@@ -85,6 +101,13 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
 	fn := func(w http.ResponseWriter, req *http.Request) {
+		if l.filter != nil && req != nil {
+			if !l.filter(req) {
+				next.ServeHTTP(w, req)
+				return
+			}
+		}
+
 		t0 := time.Now()
 
 		parentCtx := context.Background()
@@ -151,7 +174,7 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 
 		if req != nil && req.URL != nil {
 			accessLog.Host = req.URL.Host
-			accessLog.Path = req.URL.EscapedPath()
+			accessLog.Path = req.URL.String()
 		}
 
 		// ending the capture request span right before we do actual ServeHTTP.

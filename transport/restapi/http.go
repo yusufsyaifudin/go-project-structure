@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
-
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -89,8 +88,8 @@ var _ http.Handler = (*HTTP)(nil)
 // NewHTTP implements http.Handler using echo as router.
 func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 	e := echo.New()
+
 	e.Use(
-		middleware.RemoveTrailingSlash(),
 		middleware.CORS(),
 	)
 

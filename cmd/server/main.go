@@ -11,13 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -31,7 +33,6 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
-	"go.opentelemetry.io/otel/propagation"
 )
 
 type Config struct {
@@ -137,21 +138,54 @@ func main() {
 		return
 	}
 
-	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	// Register all endpoint that you won't need to be logged and traced.
+	// For example, /ping can be skipped (return false) because it will be exhaust your Kubernetes log
+	// if you set it as Readiness Probe.
+	filterLogEndpoint := func(req *http.Request) bool {
+		// Return "false" to indicate that this condition should be skipped in Log and Tracing.
+		// Return "true" to indicate that this condition should be pushed in Log and Tracing.
+		return true
+	}
 
+	// NOTE:
+	// Please note that the HTTP raw middleware ordering is not like what we "naturally" think.
+	// If we think that Logger middleware run before otelhttp middleware, you wrong!
+	// The order of these middleware are:
+	// 1. Remove trailing slash, then
+	// 2. Continue from request tracer span (if exist in request header) or create new tracer span, then
+	// 3. Add middleware log!
+
+	// Add logger middleware
+	serverMux = httpservermw.LoggingMiddleware(serverMux,
+		httpservermw.LogMwWithLogger(logger),
+		httpservermw.LogMwWithMessage("incoming request log"),
+		httpservermw.LogMwWithTracer(tracerProvider),
+		httpservermw.LogMwWithFilter(filterLogEndpoint),
+	)
+
+	// Propagate OpenTelemetry tracing
+	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 	serverMux = otelhttp.NewHandler(serverMux,
 		assets.AppName+"_server",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
 		otelhttp.WithPropagators(propagator),
 		otelhttp.WithTracerProvider(tracerProvider),
+		otelhttp.WithFilter(filterLogEndpoint),
+		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+			if r == nil {
+				return fmt.Sprintf("%s [on nil request]", operation)
+			}
+
+			if r.URL == nil {
+				return fmt.Sprintf("%s %s [on nil url]", operation, r.Method)
+			}
+
+			return fmt.Sprintf("[%s] %s %s", operation, r.Method, r.URL.Path)
+		}),
 	)
 
-	// add logger middleware
-	serverMux = httpservermw.LoggingMiddleware(serverMux,
-		httpservermw.LogMwWithLogger(logger),
-		httpservermw.LogMwWithMessage("incoming request log"),
-		httpservermw.LogMwWithTracer(tracerProvider),
-	)
+	// Remove trailing slashes.
+	serverMux = httpservermw.RemoveTrailingSlash(serverMux)
 
 	httpPortStr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpServer := &http.Server{
@@ -185,7 +219,7 @@ func newResource() *resource.Resource {
 		resource.Default(),
 		resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(assets.AppName),
+			semconv.ServiceNameKey.String(assets.AppName+"_server"),
 			semconv.ServiceVersionKey.String("v0.1.0"),
 			attribute.String("environment", "demo"),
 		),

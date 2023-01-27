@@ -59,6 +59,14 @@ func TestLogMwWithTracer(t *testing.T) {
 	})
 }
 
+func TestLogMwWithFilter(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		opt := httpservermw.LogMwWithFilter(nil)
+		err := opt(logMwTest)
+		assert.NoError(t, err)
+	})
+}
+
 func TestLoggingMiddleware(t *testing.T) {
 	handlerMock := &mockHandler{
 		responseCode: http.StatusOK,
@@ -67,6 +75,21 @@ func TestLoggingMiddleware(t *testing.T) {
 		},
 		responseBody: `{"FOO":"BAR"}`,
 	}
+
+	t.Run("with filter", func(t *testing.T) {
+		handler := httpservermw.LoggingMiddleware(handlerMock, httpservermw.LogMwWithFilter(func(request *http.Request) bool {
+			return false
+		}))
+
+		req, err := http.NewRequest(http.MethodPost, "http://localhost", bytes.NewBufferString(`{"foo":"bar"}`))
+		assert.NotNil(t, req)
+		assert.NoError(t, err)
+
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
+	})
 
 	t.Run("normal case", func(t *testing.T) {
 		handler := httpservermw.LoggingMiddleware(handlerMock)
@@ -77,8 +100,8 @@ func TestLoggingMiddleware(t *testing.T) {
 
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.Code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 
 	t.Run("non-valid json request body", func(t *testing.T) {
@@ -90,8 +113,8 @@ func TestLoggingMiddleware(t *testing.T) {
 
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.Code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 
 	t.Run("failed copy request body", func(t *testing.T) {
@@ -104,8 +127,8 @@ func TestLoggingMiddleware(t *testing.T) {
 
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.Code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 
 	t.Run("failed close request body", func(t *testing.T) {
@@ -118,8 +141,8 @@ func TestLoggingMiddleware(t *testing.T) {
 
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.Code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 
 	t.Run("invalid json response body", func(t *testing.T) {
@@ -139,8 +162,8 @@ func TestLoggingMiddleware(t *testing.T) {
 
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.Code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.Code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 
 	t.Run("failed to write response body", func(t *testing.T) {
@@ -159,84 +182,7 @@ func TestLoggingMiddleware(t *testing.T) {
 			code: http.StatusOK,
 		}
 		handler.ServeHTTP(resp, req)
-		assert.Equal(t, resp.code, handlerMock.responseCode)
-		assert.Equal(t, httpservermw.HttpHeaderToSimpleMap(resp.Header()), handlerMock.responseHeader)
+		assert.Equal(t, handlerMock.responseCode, resp.code)
+		assert.Equal(t, handlerMock.responseHeader, httpservermw.HttpHeaderToSimpleMap(resp.Header()))
 	})
 }
-
-type mockHandler struct {
-	responseCode   int
-	responseHeader map[string]string
-	responseBody   string
-}
-
-func (m *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	for k, v := range m.responseHeader {
-		w.Header().Set(k, v)
-	}
-
-	w.WriteHeader(m.responseCode)
-	_, _ = w.Write([]byte(m.responseBody))
-
-}
-
-type buf struct {
-	err error
-}
-
-var _ io.Reader = (*buf)(nil)
-
-func newBuf(err error) io.Reader {
-	return &buf{
-		err: err,
-	}
-}
-
-func (b *buf) Read(p []byte) (n int, err error) {
-	if b.err != nil {
-		return 0, b.err
-	}
-
-	return len(p), nil
-}
-
-type closer struct {
-	buf io.Reader
-	err error
-}
-
-var _ io.ReadCloser = (*closer)(nil)
-
-func newCloser(buf io.Reader, err error) *closer {
-	return &closer{
-		buf: buf,
-		err: err,
-	}
-}
-
-func (c *closer) Read(p []byte) (n int, err error) {
-	return c.buf.Read(p)
-}
-
-func (c *closer) Close() error {
-	return c.err
-}
-
-type mockRespWriter struct {
-	header http.Header
-	write  func(b []byte) (int, error)
-	code   int
-}
-
-var _ http.ResponseWriter = (*mockRespWriter)(nil)
-
-func (m *mockRespWriter) Header() http.Header {
-	return m.header
-}
-
-func (m *mockRespWriter) Write(i []byte) (int, error) {
-	return m.write(i)
-}
-
-func (m *mockRespWriter) WriteHeader(_ int) {}

@@ -6,9 +6,14 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
+)
+
+const (
+	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
 type Opt func(*SystemHandler) error
@@ -81,8 +86,23 @@ type PingResp struct {
 
 func (s *SystemHandler) Ping(c echo.Context) error {
 	ctx := c.Request().Context()
-	_, span := s.observability.Tracer().Start(ctx, "Ping Handler")
+
+	// Instead of using s.observability.Tracer().Start(ctx, "Ping Handler")
+	// Please use SpanFromContext from go.opentelemetry.io/otel/trace
+	// This will continue the Span from previous context if exists.
+	// Otherwise, it will use noopSpan{} that does nothing.
+	//
+	// If you still use s.observability.Tracer().Start(ctx, "Ping Handler"),
+	// you will get non-consistent tracing where current Span will be pushed to OpenTelemetry agent,
+	// but in fact you already disable this route via Filter in main.go server.
+	span := trace.SpanFromContext(ctx)
 	defer span.End()
+
+	// Get new span and child context from TracerProvider in propagated Span.
+	// Name of tracer doesn't need the current package,
+	// but, for make it consistent use current package name.
+	_, spanChild := span.TracerProvider().Tracer(instrumentationName).Start(ctx, "Ping Handler")
+	defer spanChild.End()
 
 	return c.JSON(http.StatusOK, respbuilder.Ok(respbuilder.Success, PingResp{
 		CommitHash:   s.buildCommitID,
@@ -138,6 +158,13 @@ type SystemInfoResp struct {
 }
 
 func (s *SystemHandler) SystemInfo(c echo.Context) error {
+	ctx := c.Request().Context()
+	span := trace.SpanFromContext(ctx)
+	defer span.End()
+
+	_, spanChild := span.TracerProvider().Tracer(instrumentationName).Start(ctx, "System Info Handler")
+	defer spanChild.End()
+
 	var bToMb = func(b uint64) uint64 {
 		return b / 1024 / 1024
 	}
