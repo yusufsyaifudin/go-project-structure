@@ -8,19 +8,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/propagation"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
-
-	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
-
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
@@ -30,9 +27,11 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
 type Config struct {
@@ -70,7 +69,8 @@ func main() {
 	// ** Prepare logger using ylog
 	logger := ylog.SetupZapLogger(cfg.LogLevel)
 
-	logger.Info(systemCtx, "trying to parse build time info")
+	// prepare Prometheus registry
+	prometheusRegistry := prometheus.NewRegistry()
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
@@ -144,6 +144,19 @@ func main() {
 	filterLogEndpoint := func(req *http.Request) bool {
 		// Return "false" to indicate that this condition should be skipped in Log and Tracing.
 		// Return "true" to indicate that this condition should be pushed in Log and Tracing.
+		if req == nil {
+			return true
+		}
+
+		if req.URL == nil {
+			return true
+		}
+
+		switch strings.TrimRight(req.URL.Path, "/") {
+		case "/metrics":
+			return false
+		}
+
 		return true
 	}
 
@@ -152,8 +165,9 @@ func main() {
 	// If we think that Logger middleware run before otelhttp middleware, you wrong!
 	// The order of these middleware are:
 	// 1. Remove trailing slash, then
-	// 2. Continue from request tracer span (if exist in request header) or create new tracer span, then
-	// 3. Add middleware log!
+	// 2. Add Prometheus middleware metrics, then
+	// 3. Continue from request tracer span (if exist in request header) or create new tracer span, then
+	// 4. Add middleware log!
 
 	// Add logger middleware
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
@@ -183,6 +197,18 @@ func main() {
 			return fmt.Sprintf("[%s] %s %s", operation, r.Method, r.URL.Path)
 		}),
 	)
+
+	// Add Prometheus middleware metrics
+	// prepare middleware and handler for Prometheus at the same time
+	serverMux, err = httpservermw.PrometheusMiddleware(serverMux,
+		httpservermw.PrometheusOptEnableGoMetric(false),
+		httpservermw.PrometheusOptWithRegisterer(prometheusRegistry),
+		httpservermw.PrometheusOptWithGatherer(prometheusRegistry),
+	)
+	if err != nil {
+		logger.Error(systemCtx, "cannot prepare prometheus middleware", ylog.KV("error", err))
+		return
+	}
 
 	// Remove trailing slashes.
 	serverMux = httpservermw.RemoveTrailingSlash(serverMux)

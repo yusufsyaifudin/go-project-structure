@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
-
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type HTTPConfig func(*HTTP) error

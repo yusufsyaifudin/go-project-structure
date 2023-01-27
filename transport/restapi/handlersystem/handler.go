@@ -10,6 +10,7 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
 )
 
 const (
@@ -55,6 +56,9 @@ type SystemHandler struct {
 	startupTime   time.Time
 	observability observability.Observability
 }
+
+// Ensure SystemHandler implements restapi.EchoRouter to successfully register endpoint to Echo framework.
+var _ restapi.EchoRouter = (*SystemHandler)(nil)
 
 func New(opts ...Opt) (*SystemHandler, error) {
 	systemHandler := &SystemHandler{
