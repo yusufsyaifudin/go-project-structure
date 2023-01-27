@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
+
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 
 	"github.com/caarlos0/env"
@@ -26,7 +28,6 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
@@ -72,7 +73,7 @@ func main() {
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(logger),
+		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)

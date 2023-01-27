@@ -3,6 +3,8 @@ package oteltracer
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel/exporters/jaeger"
@@ -11,15 +13,12 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type ExporterOpt func(*ExporterOption) error
 
 // WithLogger set logger instance for the STDOUT span exporter.
-// Context must be injected in order to
-func WithLogger(logger ylog.Logger) ExporterOpt {
+func WithLogger(logger io.Writer) ExporterOpt {
 	return func(option *ExporterOption) error {
 		if logger == nil {
 			return fmt.Errorf("cannot use nil logger")
@@ -49,7 +48,7 @@ func WithOTLPEndpoint(endpoint string) ExporterOpt {
 }
 
 type ExporterOption struct {
-	logger         ylog.Logger
+	logger         io.Writer
 	jaegerEndpoint string
 	otlpEndpoint   string
 }
@@ -58,7 +57,7 @@ type ExporterOption struct {
 // Default to noop exporter if no name or NOOP specified.
 func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, error) {
 	cfg := &ExporterOption{
-		logger:         ylog.NewNoop(),
+		logger:         os.Stdout,
 		jaegerEndpoint: "http://localhost:14268/api/traces",
 		otlpEndpoint:   "localhost:4318",
 	}
@@ -97,7 +96,7 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 
 	case "STDOUT":
 		return stdouttrace.New(
-			stdouttrace.WithWriter(ylog.WrapIOWriter(cfg.logger)),
+			stdouttrace.WithWriter(cfg.logger),
 			// Use human-readable output.
 			stdouttrace.WithPrettyPrint(),
 			// Do not print timestamps for the demo.

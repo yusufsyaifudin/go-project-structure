@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
+
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/mitchellh/cli"
@@ -18,7 +20,6 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	pingcli "github.com/yusufsyaifudin/go-project-structure/cmd/cli/ping"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
@@ -53,7 +54,7 @@ func main() {
 	var tracerErr error
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerErr = oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(logger),
+		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)

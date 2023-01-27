@@ -1,12 +1,12 @@
 package oteltracer_test
 
 import (
+	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/oteltracer"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"github.com/stretchr/testify/assert"
 )
 
 var tracerExporterText = &oteltracer.ExporterOption{}
@@ -19,7 +19,7 @@ func TestWithLogger(t *testing.T) {
 	})
 
 	t.Run("not-nil", func(t *testing.T) {
-		opt := oteltracer.WithLogger(ylog.NewNoop())
+		opt := oteltracer.WithLogger(os.Stdout)
 		err := opt(tracerExporterText)
 		assert.NoError(t, err)
 	})
