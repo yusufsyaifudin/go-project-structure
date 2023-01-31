@@ -71,6 +71,13 @@ services:
     expose:
       - 9090
 
+  prom-push-gateway:
+    image: prom/pushgateway:v1.5.1
+    container_name: prom-push-gateway
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+
   grafana:
     image: grafana/grafana-oss:9.3.6
     # ports will be accessible internally and published on the host machine.

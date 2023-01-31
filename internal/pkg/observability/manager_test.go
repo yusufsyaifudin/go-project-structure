@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
@@ -35,6 +36,20 @@ func TestWithTracerProvider(t *testing.T) {
 
 	t.Run("not-nil", func(t *testing.T) {
 		opt := observability.WithTracerProvider(trace.NewNoopTracerProvider())
+		err := opt(mgrTest)
+		assert.NoError(t, err)
+	})
+}
+
+func TestWithMetric(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		opt := observability.WithMetric(nil)
+		err := opt(mgrTest)
+		assert.Error(t, err)
+	})
+
+	t.Run("not-nil", func(t *testing.T) {
+		opt := observability.WithMetric(metrics.NewNoop())
 		err := opt(mgrTest)
 		assert.NoError(t, err)
 	})

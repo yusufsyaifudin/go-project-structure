@@ -5,6 +5,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
@@ -34,10 +35,23 @@ func WithTracerProvider(provider trace.TracerProvider) Opt {
 	}
 }
 
+// WithMetric set metric to capture system statistic
+func WithMetric(metric metrics.Metric) Opt {
+	return func(manager *Manager) error {
+		if metric == nil {
+			return fmt.Errorf("cannot use nil metric")
+		}
+
+		manager.metric = metric
+		return nil
+	}
+}
+
 type Manager struct {
 	logger         ylog.Logger
 	tracerProvider trace.TracerProvider
 	tracer         trace.Tracer
+	metric         metrics.Metric
 }
 
 var _ Observability = (*Manager)(nil)
@@ -50,6 +64,7 @@ func NewManager(opts ...Opt) (*Manager, error) {
 		logger:         ylog.NewNoop(),
 		tracerProvider: tp,
 		tracer:         tp.Tracer(instrumentationName),
+		metric:         metrics.NewNoop(),
 	}
 
 	for _, opt := range opts {
@@ -71,4 +86,8 @@ func (m *Manager) Logger() ylog.Logger {
 
 func (m *Manager) Tracer() trace.Tracer {
 	return m.tracer
+}
+
+func (m *Manager) Metric() metrics.Metric {
+	return m.metric
 }

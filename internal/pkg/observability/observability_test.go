@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 )
 
@@ -17,5 +18,8 @@ func TestNewNoop(t *testing.T) {
 
 		tracer := observer.Tracer()
 		assert.NotNil(t, tracer)
+
+		metric := observer.Metric()
+		assert.NotNil(t, metric)
 	})
 }

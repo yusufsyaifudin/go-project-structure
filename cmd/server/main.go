@@ -14,7 +14,6 @@ import (
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -27,6 +26,7 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
@@ -70,9 +70,6 @@ func main() {
 	// ** Prepare logger using ylog
 	logger := ylog.SetupZapLogger(cfg.LogLevel)
 
-	// prepare Prometheus registry
-	prometheusRegistry := prometheus.NewRegistry()
-
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
 		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
@@ -98,9 +95,17 @@ func main() {
 		}
 	}()
 
+	//var prometheusMetric metrics.Metric = metrics.NewNoop()
+	prometheusMetric, err := metrics.NewPrometheus(metrics.PrometheusWithPrefix(serviceName + "_"))
+	if err != nil {
+		logger.Error(systemCtx, "cannot prepare prometheus metric", ylog.KV("error", err))
+		return
+	}
+
 	observeMgr, err := observability.NewManager(
 		observability.WithLogger(logger),
 		observability.WithTracerProvider(tracerProvider),
+		observability.WithMetric(prometheusMetric),
 	)
 	if err != nil {
 		logger.Error(systemCtx, "failed setup observability manager", ylog.KV("error", err))
@@ -202,10 +207,7 @@ func main() {
 	// Add Prometheus middleware metrics
 	// prepare middleware and handler for Prometheus at the same time
 	serverMux, err = httpservermw.PrometheusMiddleware(serverMux,
-		httpservermw.PrometheusOptEnableGoMetric(true),
-		// Add prefix "servicename_" to differentiate from another metric
-		httpservermw.PrometheusOptWithRegisterer(prometheus.WrapRegistererWithPrefix(serviceName+"_", prometheusRegistry)),
-		httpservermw.PrometheusOptWithGatherer(prometheusRegistry),
+		httpservermw.PrometheusWithMetric(prometheusMetric),
 	)
 	if err != nil {
 		logger.Error(systemCtx, "cannot prepare prometheus middleware", ylog.KV("error", err))

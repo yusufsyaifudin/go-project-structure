@@ -1,8 +1,10 @@
 package observability
 
 import (
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 const (
@@ -15,6 +17,7 @@ const (
 type Observability interface {
 	Logger() ylog.Logger
 	Tracer() trace.Tracer
+	Metric() metrics.Metric
 }
 
 type Noop struct{}
@@ -32,4 +35,8 @@ func (n *Noop) Logger() ylog.Logger {
 
 func (n *Noop) Tracer() trace.Tracer {
 	return trace.NewNoopTracerProvider().Tracer(instrumentationName)
+}
+
+func (n *Noop) Metric() metrics.Metric {
+	return metrics.NewNoop()
 }
