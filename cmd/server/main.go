@@ -47,6 +47,7 @@ func main() {
 	systemCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	serviceName := assets.AppName + "_server"
 	buildCommitID := assets.BuildCommitID()
 	buildTime := assets.BuildTime()
 
@@ -88,7 +89,7 @@ func main() {
 
 	tracerProvider := trace.NewTracerProvider(
 		trace.WithBatcher(tracerExporter),
-		trace.WithResource(newResource()),
+		trace.WithResource(newResource(serviceName)),
 		trace.WithSampler(trace.AlwaysSample()),
 	)
 	defer func() {
@@ -201,8 +202,9 @@ func main() {
 	// Add Prometheus middleware metrics
 	// prepare middleware and handler for Prometheus at the same time
 	serverMux, err = httpservermw.PrometheusMiddleware(serverMux,
-		httpservermw.PrometheusOptEnableGoMetric(false),
-		httpservermw.PrometheusOptWithRegisterer(prometheusRegistry),
+		httpservermw.PrometheusOptEnableGoMetric(true),
+		// Add prefix "servicename_" to differentiate from another metric
+		httpservermw.PrometheusOptWithRegisterer(prometheus.WrapRegistererWithPrefix(serviceName+"_", prometheusRegistry)),
 		httpservermw.PrometheusOptWithGatherer(prometheusRegistry),
 	)
 	if err != nil {
@@ -240,12 +242,12 @@ func main() {
 }
 
 // newResource returns a resource describing this application.
-func newResource() *resource.Resource {
+func newResource(serviceName string) *resource.Resource {
 	r, _ := resource.Merge(
 		resource.Default(),
 		resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(assets.AppName+"_server"),
+			semconv.ServiceNameKey.String(serviceName),
 			semconv.ServiceVersionKey.String("v0.1.0"),
 			attribute.String("environment", "demo"),
 		),

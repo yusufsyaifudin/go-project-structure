@@ -51,4 +51,4 @@ server-darwin
 
 # Custom
 .env
-/dockerdata
+docker-data/

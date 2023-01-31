@@ -7,12 +7,13 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type PrometheusOpt func(*Prometheus) error
@@ -68,7 +69,8 @@ type Prometheus struct {
 	gatherer       prometheus.Gatherer
 
 	// default statistic for HTTP middleware
-	httpRequestsCounter *prometheus.CounterVec
+	httpRequestsCounter  *prometheus.CounterVec
+	httpRequestsDuration *prometheus.HistogramVec
 }
 
 var _ http.Handler = (*Prometheus)(nil)
@@ -94,11 +96,21 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 		[]string{"code", "method", "path"},
 	)
 
+	httpReqDur := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_requests_duration",
+			Help:    "The HTTP request latencies in nanoseconds.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"code", "method", "path"},
+	)
+
 	prom := &Prometheus{
-		enableGoMetric:      false,
-		baseMux:             baseMux,
-		logger:              ylog.NewNoop(),
-		httpRequestsCounter: httpRequests,
+		baseMux:              baseMux,
+		enableGoMetric:       false,
+		logger:               ylog.NewNoop(),
+		httpRequestsCounter:  httpRequests,
+		httpRequestsDuration: httpReqDur,
 	}
 
 	for _, opt := range opts {
@@ -124,7 +136,9 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 	}
 
 	if prom.enableGoMetric {
-		err = prom.registerer.Register(collectors.NewGoCollector())
+		err = prom.registerer.Register(collectors.NewGoCollector(
+			collectors.WithGoCollectorRuntimeMetrics(),
+		))
 		if err != nil {
 			return nil, err
 		}
@@ -135,6 +149,8 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 
 // ServeHTTP implements http.Handler and act as net/http server middleware.
 func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+
+	t0 := time.Now()
 
 	if req != nil && req.URL != nil && req.URL.Path == "/metrics" {
 		// If user request /metrics endpoint,
@@ -162,6 +178,12 @@ func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		"method": req.Method,
 		"path":   req.URL.Path,
 	}).Inc()
+
+	p.httpRequestsDuration.With(prometheus.Labels{
+		"code":   strconv.Itoa(respRec.Code),
+		"method": req.Method,
+		"path":   req.URL.Path,
+	}).Observe(float64(time.Since(t0).Nanoseconds()))
 
 	// Write headers to actual writer.
 	for k, v := range respRec.Header() {

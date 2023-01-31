@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 1s
+
+scrape_configs:
+  - job_name: "prometheus"
+    scrape_interval: 1s
+    static_configs:
+      - targets: ["localhost:9090"] # we use "prometheus" because it used in internal Docker compose
+
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"] # we use "node-exporter" because it used in internal Docker compose
+
+  - job_name: "myapp"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["192.168.1.40:3001"] # Change to your Host IP or your application URL that expose /metrics endpoint
