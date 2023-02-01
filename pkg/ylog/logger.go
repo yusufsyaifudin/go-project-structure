@@ -4,13 +4,6 @@ import (
 	"context"
 )
 
-type logType string
-
-const (
-	typeAccessLog logType = "access_log"
-	typeSys       logType = "sys"
-)
-
 // Logger is an logger contract with level and context passing.
 type Logger interface {
 	Debug(ctx context.Context, msg string, fields ...KeyValue)
@@ -20,6 +13,8 @@ type Logger interface {
 	Panic(ctx context.Context, msg string, fields ...KeyValue)
 	Fatal(ctx context.Context, msg string, fields ...KeyValue)
 	Access(ctx context.Context, msg string, data AccessLogData)
+
+	WithStaticFields(fields ...KeyValue) Logger
 }
 
 type KeyValue interface {

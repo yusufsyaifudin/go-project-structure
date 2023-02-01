@@ -68,11 +68,15 @@ func main() {
 	}
 
 	// ** Prepare logger using ylog
-	logger := ylog.SetupZapLogger(cfg.LogLevel)
+	logger := ylog.SetupZapLogger(cfg.LogLevel).WithStaticFields(
+		ylog.KV("service_name", serviceName),
+		ylog.KV("service_build_commit_hash", buildCommitID),
+		ylog.KV("service_build_ts", buildTime),
+	)
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
+		oteltracer.WithLogger(ylog.WrapIOWriter(logger, ylog.LoggerIOWriterWithContext(systemCtx), ylog.LoggerIOWriterWithMsg("OpenTelemetry tracer stdout"))),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
 	)

@@ -23,3 +23,7 @@ func (n *Noop) Panic(ctx context.Context, msg string, fields ...KeyValue) {}
 func (n *Noop) Fatal(ctx context.Context, msg string, fields ...KeyValue) {}
 
 func (n *Noop) Access(ctx context.Context, msg string, data AccessLogData) {}
+
+func (n *Noop) WithStaticFields(fields ...KeyValue) Logger {
+	return NewNoop()
+}

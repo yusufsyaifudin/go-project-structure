@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 )
 
 type LoggerIOWriterOpt func(*LoggerIOWriter)
@@ -19,9 +20,22 @@ func LoggerIOWriterWithContext(ctx context.Context) LoggerIOWriterOpt {
 	}
 }
 
+// LoggerIOWriterWithMsg set message for logger.
+func LoggerIOWriterWithMsg(msg string) LoggerIOWriterOpt {
+	return func(w *LoggerIOWriter) {
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			return
+		}
+
+		w.msg = msg
+	}
+}
+
 // LoggerIOWriter wrap ylog.Logger as io.Writer
 type LoggerIOWriter struct {
 	ctx    context.Context
+	msg    string
 	logger Logger
 }
 
@@ -37,7 +51,7 @@ func (l *LoggerIOWriter) Write(p []byte) (n int, err error) {
 		jsonObj = string(p)
 	}
 
-	l.logger.Debug(l.ctx, "tracer log", KV("data", jsonObj))
+	l.logger.Debug(l.ctx, l.msg, KV("data", jsonObj))
 	return len(p), nil
 }
 
@@ -49,6 +63,7 @@ func WrapIOWriter(logger Logger, opts ...LoggerIOWriterOpt) io.Writer {
 
 	w := &LoggerIOWriter{
 		ctx:    context.Background(),
+		msg:    "ylog.Logger wrap to io.Writer",
 		logger: logger,
 	}
 

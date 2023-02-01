@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/trace"
 
@@ -91,14 +93,21 @@ type PingResp struct {
 func (s *SystemHandler) Ping(c echo.Context) error {
 	ctx := c.Request().Context()
 
+	// This is example where you want to propagate static field in this ping handler context.
+	// Also to give you the example that you will get the "trace_id" and "span_id" in the log
+	// even you disable OpenTelemetry by setting the OTEL_EXPORTER to NOOP.
+	logger := s.observability.Logger().WithStaticFields(ylog.KV("handler_name", "ping"))
+	logger.Info(ctx, "my handler log")
+
 	// Instead of using s.observability.Tracer().Start(ctx, "Ping Handler")
 	// Please use SpanFromContext from go.opentelemetry.io/otel/trace
 	// This will continue the Span from previous context if exists.
 	// Otherwise, it will use noopSpan{} that does nothing.
 	//
 	// If you still use s.observability.Tracer().Start(ctx, "Ping Handler"),
-	// you will get non-consistent tracing where current Span will be pushed to OpenTelemetry agent,
-	// but in fact you already disable this route via Filter in main.go server.
+	// you will get non-consistent tracing, for example:
+	// current Span will still be pushed to OpenTelemetry agent,
+	// despite the fact you already disable this route via Filter in main.go server.
 	span := trace.SpanFromContext(ctx)
 	defer span.End()
 
