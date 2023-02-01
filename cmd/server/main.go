@@ -95,17 +95,28 @@ func main() {
 		}
 	}()
 
-	//var prometheusMetric metrics.Metric = metrics.NewNoop()
-	prometheusMetric, err := metrics.NewPrometheus(metrics.PrometheusWithPrefix(serviceName + "_"))
+	prometheusMetric, err := metrics.NewPrometheus(
+		metrics.PrometheusWithPrefix(serviceName + "_"),
+	)
 	if err != nil {
 		logger.Error(systemCtx, "cannot prepare prometheus metric", ylog.KV("error", err))
+		return
+	}
+
+	// combine metrics to various type of outputs (prometheus, statsd, etc)
+	var combinedMetrics metrics.Metric
+	combinedMetrics, err = metrics.NewCombinedMetrics(
+		metrics.CombineMetricAdd(prometheusMetric),
+	)
+	if err != nil {
+		logger.Error(systemCtx, "cannot combine metrics collector", ylog.KV("error", err))
 		return
 	}
 
 	observeMgr, err := observability.NewManager(
 		observability.WithLogger(logger),
 		observability.WithTracerProvider(tracerProvider),
-		observability.WithMetric(prometheusMetric),
+		observability.WithMetric(combinedMetrics),
 	)
 	if err != nil {
 		logger.Error(systemCtx, "failed setup observability manager", ylog.KV("error", err))

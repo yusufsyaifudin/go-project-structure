@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -131,24 +130,9 @@ func (h *HTTP) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *HTTP) httpErrorHandler(err error, eCtx echo.Context) {
-	t0 := time.Now()
 	ctx := eCtx.Request().Context()
 
 	httpStatus := http.StatusUnprocessableEntity
-
-	defer func() {
-		h.observability.Metric().GetCounterVec("http_requests_total", map[string]string{
-			"code":   strconv.Itoa(httpStatus),
-			"method": eCtx.Request().Method,
-			"path":   eCtx.Request().URL.Path,
-		}).Incr(1)
-
-		h.observability.Metric().GetTimerVec("http_requests_duration", map[string]string{
-			"code":   strconv.Itoa(httpStatus),
-			"method": eCtx.Request().Method,
-			"path":   eCtx.Request().URL.Path,
-		}).Timing(time.Since(t0).Nanoseconds())
-	}()
 
 	var errHTTP *echo.HTTPError
 	if errors.As(err, &errHTTP) {

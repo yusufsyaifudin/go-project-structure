@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"net/http"
-	"sort"
 	"sync"
 
 	"github.com/google/go-cmp/cmp"
@@ -28,9 +27,9 @@ type Prometheus struct {
 	gatherer   prometheus.Gatherer
 
 	lock    sync.RWMutex
-	counter map[string]*promCounter
-	gauge   map[string]*promGauge
-	timer   map[string]*promTimer
+	counter map[string]*promCounterVec
+	gauge   map[string]*promGaugeVec
+	timer   map[string]*promTimerVec
 }
 
 var _ Metric = (*Prometheus)(nil)
@@ -43,9 +42,9 @@ func NewPrometheus(opts ...PrometheusOpt) (*Prometheus, error) {
 		registerer: registry,
 		gatherer:   registry,
 		lock:       sync.RWMutex{},
-		counter:    make(map[string]*promCounter),
-		gauge:      make(map[string]*promGauge),
-		timer:      make(map[string]*promTimer),
+		counter:    make(map[string]*promCounterVec),
+		gauge:      make(map[string]*promGaugeVec),
+		timer:      make(map[string]*promTimerVec),
 	}
 
 	for _, opt := range opts {
@@ -70,20 +69,14 @@ func NewPrometheus(opts ...PrometheusOpt) (*Prometheus, error) {
 	return p, nil
 }
 
-func (p *Prometheus) GetCounterVec(name string, labels map[string]string) StatCounter {
-	labelNames := make([]string, 0)
-	for label := range labels {
-		labelNames = append(labelNames, label)
-	}
+func (p *Prometheus) GetCounterVec(name string, labelNames ...string) StatCounterVec {
 
 	p.lock.RLock()
 	counter, exist := p.counter[name]
 	if exist && counter != nil {
-		defer p.lock.RUnlock()
-		sort.Strings(labelNames)
-		sort.Strings(counter.registeredLabels)
-		if diff := cmp.Diff(labelNames, counter.registeredLabels); diff != "" {
-			panic(fmt.Errorf("counter vector name '%s' already registered: mismatch labels: %s", name, diff))
+		p.lock.RUnlock()
+		if !cmp.Equal(labelNames, counter.registeredLabels) {
+			panic(fmt.Errorf("counter vector name '%s' already registered: mismatch labels: %s vs %s", name, labelNames, counter.registeredLabels))
 		}
 
 		return counter
@@ -97,32 +90,24 @@ func (p *Prometheus) GetCounterVec(name string, labels map[string]string) StatCo
 		Help: fmt.Sprintf("%s counter metric", name),
 	}, labelNames)
 
-	counterLabelled := promCountVec.With(labels)
-	p.registerer.MustRegister(counterLabelled) // register the labelled version to ensure non-duplicate collector
+	p.registerer.MustRegister(promCountVec)
 
-	c := &promCounter{
-		counter:          counterLabelled,
+	c := &promCounterVec{
+		counter:          promCountVec,
 		registeredLabels: labelNames,
 	}
 
-	p.counter[name] = c // register with prefixed name
-	return counter
+	p.counter[name] = c
+	return c
 }
 
-func (p *Prometheus) GetGaugeVec(name string, labels map[string]string) StatGauge {
-	labelNames := make([]string, 0)
-	for label := range labels {
-		labelNames = append(labelNames, label)
-	}
-
+func (p *Prometheus) GetGaugeVec(name string, labelNames ...string) StatGaugeVec {
 	p.lock.RLock()
 	gauge, exist := p.gauge[name]
 	if exist && gauge != nil {
-		defer p.lock.RUnlock()
-		sort.Strings(labelNames)
-		sort.Strings(gauge.registeredLabels)
-		if diff := cmp.Diff(labelNames, gauge.registeredLabels); diff != "" {
-			panic(fmt.Errorf("gauge vector name '%s' already registered: mismatch labels: %s", name, diff))
+		p.lock.RUnlock()
+		if !cmp.Equal(labelNames, gauge.registeredLabels) {
+			panic(fmt.Errorf("gauge vector name '%s' already registered: mismatch labels: %s vs %s", name, labelNames, gauge.registeredLabels))
 		}
 
 		return gauge
@@ -131,37 +116,29 @@ func (p *Prometheus) GetGaugeVec(name string, labels map[string]string) StatGaug
 
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	promGaugeVec := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	prom := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: name,
 		Help: fmt.Sprintf("%s gauge metric", name),
 	}, labelNames)
 
-	gaugeLabelled := promGaugeVec.With(labels)
-	p.registerer.MustRegister(gaugeLabelled) // register the labelled version to ensure non-duplicate collector
+	p.registerer.MustRegister(prom)
 
-	g := &promGauge{
-		gauge:            gaugeLabelled,
+	g := &promGaugeVec{
+		gauge:            prom,
 		registeredLabels: labelNames,
 	}
 
-	p.gauge[name] = g // register with prefixed name
+	p.gauge[name] = g
 	return g
 }
 
-func (p *Prometheus) GetTimerVec(name string, labels map[string]string) StatTimer {
-	labelNames := make([]string, 0)
-	for label := range labels {
-		labelNames = append(labelNames, label)
-	}
-
+func (p *Prometheus) GetTimerVec(name string, labelNames ...string) StatTimerVec {
 	p.lock.RLock()
 	summary, exist := p.timer[name]
 	if exist && summary != nil {
-		defer p.lock.RUnlock()
-		sort.Strings(labelNames)
-		sort.Strings(summary.registeredLabels)
-		if diff := cmp.Diff(labelNames, summary.registeredLabels); diff != "" {
-			panic(fmt.Errorf("timer vector name '%s' already registered: mismatch labels: %s", name, diff))
+		p.lock.RUnlock()
+		if !cmp.Equal(labelNames, summary.registeredLabels) {
+			panic(fmt.Errorf("timer vector name '%s' already registered: mismatch labels: %s vs %s", name, labelNames, summary.registeredLabels))
 		}
 
 		return summary
@@ -176,15 +153,14 @@ func (p *Prometheus) GetTimerVec(name string, labels map[string]string) StatTime
 		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
 	}, labelNames)
 
-	timerLabelled := timerVec.With(labels)
-	p.registerer.MustRegister(timerVec) // register the labelled version to ensure non-duplicate collector
+	p.registerer.MustRegister(timerVec)
 
-	t := &promTimer{
-		timing:           timerLabelled,
+	t := &promTimerVec{
+		timing:           timerVec,
 		registeredLabels: labelNames,
 	}
 
-	p.timer[name] = t // register with prefixed name
+	p.timer[name] = t
 	return t
 }
 

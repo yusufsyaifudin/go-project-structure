@@ -16,7 +16,7 @@ import (
 type PrometheusOpt func(*Prometheus) error
 
 // PrometheusWithMetric set metrics.Metric
-func PrometheusWithMetric(m metrics.Metric) PrometheusOpt {
+func PrometheusWithMetric(m *metrics.Prometheus) PrometheusOpt {
 	return func(p *Prometheus) error {
 		p.metric = m
 		return nil
@@ -28,7 +28,7 @@ type Prometheus struct {
 
 	// options must be passed via PrometheusOpt function
 	logger ylog.Logger
-	metric metrics.Metric
+	metric *metrics.Prometheus
 }
 
 var _ http.Handler = (*Prometheus)(nil)
@@ -60,7 +60,7 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	t0 := time.Now()
-	if req != nil && req.URL != nil && req.URL.Path == "/metrics" {
+	if req != nil && req.URL != nil && req.URL.Path == "/metrics" && p.metric.HandlerFunc() != nil {
 		// If user request /metrics endpoint,
 		// then return the Prometheus metrics.
 
@@ -83,17 +83,14 @@ func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// ** Doing some stats counter/gauge/anything here...
 	// Always increment request counter
-	p.metric.GetCounterVec("http_requests_total", map[string]string{
-		"code":   strconv.Itoa(respRec.Code),
-		"method": req.Method,
-		"path":   req.URL.Path,
-	}).Incr(1)
+	p.metric.
+		GetCounterVec("http_requests_total", "code", "method", "path").
+		WithValues(strconv.Itoa(respRec.Code), req.Method, req.URL.Path).
+		Incr(1)
 
-	p.metric.GetTimerVec("http_requests_duration", map[string]string{
-		"code":   strconv.Itoa(respRec.Code),
-		"method": req.Method,
-		"path":   req.URL.Path,
-	}).Timing(time.Since(t0).Nanoseconds())
+	p.metric.GetTimerVec("http_requests_duration", "code", "method", "path").
+		WithValues(strconv.Itoa(respRec.Code), req.Method, req.URL.Path).
+		Timing(time.Since(t0).Nanoseconds())
 
 	// Write headers to actual writer.
 	for k, v := range respRec.Header() {

@@ -2,11 +2,23 @@ package metrics
 
 import "net/http"
 
+type noopStatCounterVec struct{}
+
+var _ StatCounterVec = (*noopStatCounterVec)(nil)
+
+func (n *noopStatCounterVec) WithValues(labelValues ...string) StatCounter { return &noopStatCounter{} }
+
 type noopStatCounter struct{}
 
 var _ StatCounter = (*noopStatCounter)(nil)
 
 func (n noopStatCounter) Incr(_ int64) {}
+
+type noopStatGaugeVec struct{}
+
+var _ StatGaugeVec = (*noopStatGaugeVec)(nil)
+
+func (n *noopStatGaugeVec) WithValues(labelValues ...string) StatGauge { return &noopStatGauge{} }
 
 type noopStatGauge struct{}
 
@@ -17,6 +29,12 @@ func (n *noopStatGauge) Set(_ int64) {}
 func (n *noopStatGauge) Incr(_ int64) {}
 
 func (n *noopStatGauge) Decr(_ int64) {}
+
+type noopStatTimerVec struct{}
+
+var _ StatTimerVec = (*noopStatTimerVec)(nil)
+
+func (n *noopStatTimerVec) WithValues(labelValues ...string) StatTimer { return &noopStatTimer{} }
 
 type noopStatTimer struct{}
 
@@ -32,20 +50,20 @@ func NewNoop() *NoopMetric {
 
 var _ Metric = (*NoopMetric)(nil)
 
-func (n *NoopMetric) GetCounterVec(name string, labels map[string]string) StatCounter {
-	return &noopStatCounter{}
+func (n *NoopMetric) GetCounterVec(name string, labelNames ...string) StatCounterVec {
+	return &noopStatCounterVec{}
 }
 
-func (n *NoopMetric) GetGaugeVec(name string, labels map[string]string) StatGauge {
-	return &noopStatGauge{}
+func (n *NoopMetric) GetGaugeVec(name string, labelNames ...string) StatGaugeVec {
+	return &noopStatGaugeVec{}
 }
 
-func (n *NoopMetric) GetTimerVec(name string, labels map[string]string) StatTimer {
-	return &noopStatTimer{}
+func (n *NoopMetric) GetTimerVec(name string, labelNames ...string) StatTimerVec {
+	return &noopStatTimerVec{}
 }
 
 func (n *NoopMetric) HandlerFunc() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {}
+	return nil
 }
 
 func (n *NoopMetric) Close() error {
