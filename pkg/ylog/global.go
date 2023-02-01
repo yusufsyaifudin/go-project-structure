@@ -1,8 +1,11 @@
 package ylog
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -41,7 +44,9 @@ func SetupZapLogger(level string) Logger {
 		zapLevel,
 	)
 
-	log := zap.New(core)
+	log := zap.New(core,
+		zap.ErrorOutput(zapcore.AddSync(&errOut{})),
+	)
 	return NewZap(log)
 }
 
@@ -66,4 +71,24 @@ func (k *kv) Key() string {
 
 func (k *kv) Value() any {
 	return k.v
+}
+
+type errOut struct{}
+
+// Write format Zap error as JSON.
+func (e *errOut) Write(b []byte) (n int, err error) {
+	buf := &bytes.Buffer{}
+	defer buf.Reset()
+
+	buf.WriteString(`{"level":"error","ts":"`)
+	buf.WriteString(time.Now().Format(time.RFC3339Nano))
+	buf.WriteString(`",`)
+	buf.WriteString(`"msg":"zap error and cannot do some process",`)
+	buf.WriteString(`"log_type":"sys",`)
+	buf.WriteString(`"error":"`)
+	buf.WriteString(strings.TrimSpace(string(b)))
+	buf.WriteString(`"}`)
+	buf.WriteString("\n")
+
+	return fmt.Fprint(os.Stdout, buf.String())
 }
