@@ -1,4 +1,5 @@
 receivers:
+  # Data sources: traces, metrics, logs
   otlp:
     protocols:
       http:
@@ -7,6 +8,9 @@ receivers:
             - "http://*"
             - "https://*"
 
+processors:
+  batch: {}
+
 exporters:
   # Data sources: traces
   jaeger:
@@ -14,13 +18,20 @@ exporters:
     tls:
       insecure: true
 
+  # Data sources: traces, metrics, logs
   logging:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
 
+  # Data sources: traces, metrics, logs
+  file:
+    path: /tmp/log/otel-log.json
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [jaeger, logging]
+      processors: [ batch ]
+      exporters: [jaeger, logging, file]
+

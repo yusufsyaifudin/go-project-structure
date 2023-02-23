@@ -27,7 +27,8 @@ services:
     container_name: otel-collector
     command: [ "--config=/etc/otel-collector-config.yaml" ]
     volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ./docker-data/otel-collector/log:/tmp/log
     ports:
       - "1888:1888"   # pprof extension
       - "8888:8888"   # Prometheus' metrics exposed by the collector
@@ -102,5 +103,5 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: secret
     volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docker-data/grafana:/var/lib/grafana
