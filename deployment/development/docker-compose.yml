@@ -24,6 +24,7 @@ services:
   # Collector
   otel-collector:
     image: otel/opentelemetry-collector:0.69.0
+    container_name: otel-collector
     command: [ "--config=/etc/otel-collector-config.yaml" ]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
@@ -80,6 +81,7 @@ services:
 
   grafana:
     image: grafana/grafana-oss:9.3.6
+    container_name: grafana
     # ports will be accessible internally and published on the host machine.
     ports:
       - "3000:3000"

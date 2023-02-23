@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
@@ -76,13 +77,30 @@ func main() {
 
 	// prepare tracer exporter, whether using stdout or jaeger
 	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(ylog.WrapIOWriter(logger, ylog.LoggerIOWriterWithContext(systemCtx), ylog.LoggerIOWriterWithMsg("OpenTelemetry tracer stdout"))),
+		oteltracer.WithLogger(ylog.WrapIOWriter(logger,
+			ylog.LoggerIOWriterWithContext(systemCtx),
+			ylog.LoggerIOWriterWithMsg("OpenTelemetry tracer stdout"),
+		)),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
+		oteltracer.WithHttpRoundTripper(httpclientmw.NewLogMw(
+			httpclientmw.LogMwWithMessage("OpenTelemetry outgoing request"),
+			httpclientmw.LogMwWithLogger(logger),
+		)),
 	)
 
+	defer func() {
+		if tracerExporter == nil {
+			return
+		}
+
+		if _err := tracerExporter.Shutdown(systemCtx); _err != nil {
+			logger.Error(systemCtx, "prepare exporter on shutdown error", ylog.KV("error", _err))
+		}
+	}()
+
 	if tracerExporterErr != nil {
-		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", tracerExporterErr.Error()))
+		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", tracerExporterErr))
 		return
 	}
 
@@ -90,7 +108,7 @@ func main() {
 
 	tracerProvider := trace.NewTracerProvider(
 		trace.WithBatcher(tracerExporter),
-		trace.WithResource(newResource(serviceName)),
+		trace.WithResource(newResource(systemCtx, logger, serviceName)),
 		trace.WithSampler(trace.AlwaysSample()),
 	)
 	defer func() {
@@ -259,15 +277,18 @@ func main() {
 }
 
 // newResource returns a resource describing this application.
-func newResource(serviceName string) *resource.Resource {
-	r, _ := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(serviceName),
-			semconv.ServiceVersionKey.String("v0.1.0"),
-			attribute.String("environment", "demo"),
-		),
+func newResource(ctx context.Context, logger ylog.Logger, serviceName string) *resource.Resource {
+	r := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceNameKey.String(serviceName),
+		semconv.ServiceVersionKey.String("v0.1.0"),
+		attribute.String("environment", "demo"),
 	)
+
+	if r == nil {
+		logger.Error(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
+		return resource.Default()
+	}
+
 	return r
 }

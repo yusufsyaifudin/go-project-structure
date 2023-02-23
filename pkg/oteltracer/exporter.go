@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -47,19 +48,31 @@ func WithOTLPEndpoint(endpoint string) ExporterOpt {
 	}
 }
 
+// WithHttpRoundTripper useful when we want to capture request-response log send by OpenTelemetry library.
+// But please note to not add more tracing, you must only use this http.RoundTripper as logger only,
+// or your tracing may create unwanted span if you add more span inside this middleware.
+func WithHttpRoundTripper(r http.RoundTripper) ExporterOpt {
+	return func(option *ExporterOption) error {
+		option.httpRoundTripper = r
+		return nil
+	}
+}
+
 type ExporterOption struct {
-	logger         io.Writer
-	jaegerEndpoint string
-	otlpEndpoint   string
+	logger           io.Writer
+	jaegerEndpoint   string
+	otlpEndpoint     string
+	httpRoundTripper http.RoundTripper
 }
 
 // NewTracerExporter select the tracer span exporter based on name.
 // Default to noop exporter if no name or NOOP specified.
 func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, error) {
 	cfg := &ExporterOption{
-		logger:         os.Stdout,
-		jaegerEndpoint: "http://localhost:14268/api/traces",
-		otlpEndpoint:   "localhost:4318",
+		logger:           os.Stdout,
+		jaegerEndpoint:   "http://localhost:14268/api/traces",
+		otlpEndpoint:     "localhost:4318",
+		httpRoundTripper: http.DefaultTransport,
 	}
 
 	for _, opt := range opts {
@@ -68,6 +81,9 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 			return nil, err
 		}
 	}
+
+	httpClient := http.DefaultClient
+	httpClient.Transport = cfg.httpRoundTripper
 
 	name = strings.TrimSpace(name)
 	name = strings.ToUpper(name)
@@ -78,7 +94,10 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 			return nil, fmt.Errorf("cannot use OpenTelemetry JAEGER if OTEL_EXPORTER_JAEGER_ENDPOINT is empty")
 		}
 
-		return jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(endpoint)))
+		return jaeger.New(jaeger.WithCollectorEndpoint(
+			jaeger.WithEndpoint(endpoint),
+			jaeger.WithHTTPClient(httpClient),
+		))
 
 	case "OTLP":
 		endpoint := strings.TrimSpace(cfg.otlpEndpoint)
