@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -48,6 +49,15 @@ func WithOTLPEndpoint(endpoint string) ExporterOpt {
 	}
 }
 
+// WithOTLPGrpcEndpoint set OpenTelemetry endpoint collector for type OTLP_GRPC span exporter using gRPC.
+// Default to localhost:4317
+func WithOTLPGrpcEndpoint(endpoint string) ExporterOpt {
+	return func(option *ExporterOption) error {
+		option.otlpGrpcEndpoint = endpoint
+		return nil
+	}
+}
+
 // WithHttpRoundTripper useful when we want to capture request-response log send by OpenTelemetry library.
 // But please note to not add more tracing, you must only use this http.RoundTripper as logger only,
 // or your tracing may create unwanted span if you add more span inside this middleware.
@@ -62,6 +72,7 @@ type ExporterOption struct {
 	logger           io.Writer
 	jaegerEndpoint   string
 	otlpEndpoint     string
+	otlpGrpcEndpoint string
 	httpRoundTripper http.RoundTripper
 }
 
@@ -72,6 +83,7 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 		logger:           os.Stdout,
 		jaegerEndpoint:   "http://localhost:14268/api/traces",
 		otlpEndpoint:     "localhost:4318",
+		otlpGrpcEndpoint: "localhost:4317",
 		httpRoundTripper: http.DefaultTransport,
 	}
 
@@ -110,6 +122,20 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 			otlptracehttp.NewClient(
 				otlptracehttp.WithInsecure(),
 				otlptracehttp.WithEndpoint(endpoint),
+			),
+		)
+
+	case "OTLP_GRPC":
+		endpoint := strings.TrimSpace(cfg.otlpGrpcEndpoint)
+		if endpoint == "" {
+			return nil, fmt.Errorf("cannot use OpenTelemetry OTLP_GRPC if OTEL_EXPORTER_OTLP_GRPC_ENDPOINT is empty")
+		}
+
+		return otlptrace.New(
+			context.Background(),
+			otlptracegrpc.NewClient(
+				otlptracegrpc.WithInsecure(),
+				otlptracegrpc.WithEndpoint(endpoint),
 			),
 		)
 

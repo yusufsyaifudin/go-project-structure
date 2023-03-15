@@ -36,11 +36,12 @@ import (
 )
 
 type Config struct {
-	HTTPPort      int    `env:"PORT" envDefault:"3000" validate:"required"`
-	LogLevel      string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
-	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP
-	OtelJaegerURL string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
-	OtelOtlpURL   string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
+	HTTPPort        int    `env:"PORT" envDefault:"3000" validate:"required"`
+	LogLevel        string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
+	OtelExporter    string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP, OTLP_GRPC
+	OtelJaegerURL   string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
+	OtelOtlpURL     string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
+	OtelOtlpGrpcURL string `env:"OTEL_EXPORTER_OTLP_GRPC_ENDPOINT" envDefault:"localhost:4317" validate:"required_if=OtelExporter OTLP_GRPC"`
 }
 
 func main() {
@@ -83,6 +84,7 @@ func main() {
 		)),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
+		oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
 		oteltracer.WithHttpRoundTripper(httpclientmw.NewLogMw(
 			httpclientmw.LogMwWithMessage("OpenTelemetry outgoing request"),
 			httpclientmw.LogMwWithLogger(logger),

@@ -2,6 +2,7 @@ receivers:
   # Data sources: traces, metrics, logs
   otlp:
     protocols:
+      grpc: {}
       http:
         cors:
           allowed_origins:

@@ -24,10 +24,11 @@ import (
 )
 
 type Config struct {
-	LogLevel      string `env:"LOG_LEVEL" envDefault:"DEBUG"`
-	OtelExporter  string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP
-	OtelJaegerURL string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
-	OtelOtlpURL   string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
+	LogLevel        string `env:"LOG_LEVEL" envDefault:"DEBUG"`
+	OtelExporter    string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP, OTLP_GRPC
+	OtelJaegerURL   string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
+	OtelOtlpURL     string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
+	OtelOtlpGrpcURL string `env:"OTEL_EXPORTER_OTLP_GRPC_ENDPOINT" envDefault:"localhost:4317" validate:"required_if=OtelExporter OTLP_GRPC"`
 }
 
 func main() {
@@ -39,6 +40,8 @@ func main() {
 		log.Fatalln(err)
 		return
 	}
+
+	serviceName := assets.AppName + "_cli"
 
 	// systemCtx is context for system-wide process, it should not pass into HTTP or any Client process.
 	systemCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -57,6 +60,7 @@ func main() {
 		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
 		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
 		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
+		oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
 	)
 	if tracerErr != nil {
 		tracerExporter = tracetest.NewNoopExporter()
@@ -69,7 +73,7 @@ func main() {
 	tracerProvider := trace.NewTracerProvider(
 		// use sync operation to make sure every span persisted before CLI done
 		trace.WithSyncer(tracerExporter),
-		trace.WithResource(newResource()),
+		trace.WithResource(newResource(systemCtx, logger, serviceName)),
 		trace.WithSampler(trace.AlwaysSample()),
 	)
 	defer func() {
@@ -98,15 +102,18 @@ func main() {
 }
 
 // newResource returns a resource describing this application.
-func newResource() *resource.Resource {
-	r, _ := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(assets.AppName+"_cli"),
-			semconv.ServiceVersionKey.String("v0.1.0"),
-			attribute.String("environment", "demo"),
-		),
+func newResource(ctx context.Context, logger ylog.Logger, serviceName string) *resource.Resource {
+	r := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceNameKey.String(serviceName),
+		semconv.ServiceVersionKey.String("v0.1.0"),
+		attribute.String("environment", "demo"),
 	)
+
+	if r == nil {
+		logger.Error(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
+		return resource.Default()
+	}
+
 	return r
 }

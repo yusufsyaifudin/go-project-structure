@@ -53,6 +53,20 @@ func TestWithOTLPEndpoint(t *testing.T) {
 	})
 }
 
+func TestWithOTLPGrpcEndpoint(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		opt := oteltracer.WithOTLPGrpcEndpoint("")
+		err := opt(tracerExporterText)
+		assert.NoError(t, err)
+	})
+
+	t.Run("not-nil", func(t *testing.T) {
+		opt := oteltracer.WithOTLPGrpcEndpoint("localhost:4317")
+		err := opt(tracerExporterText)
+		assert.NoError(t, err)
+	})
+}
+
 func TestNewTracerExporter(t *testing.T) {
 	t.Run("error exporter", func(t *testing.T) {
 		spanExporter, err := oteltracer.NewTracerExporter("stdout", oteltracer.WithLogger(nil))
@@ -64,6 +78,7 @@ func TestNewTracerExporter(t *testing.T) {
 		types := []string{
 			"JAEGER",
 			"OTLP",
+			"OTLP_GRPC",
 			"STDOUT",
 			"NOOP",
 		}
@@ -85,6 +100,12 @@ func TestNewTracerExporter(t *testing.T) {
 
 	t.Run("otlp without endpoint", func(t *testing.T) {
 		spanExporter, err := oteltracer.NewTracerExporter("otlp", oteltracer.WithOTLPEndpoint(""))
+		assert.Nil(t, spanExporter)
+		assert.Error(t, err)
+	})
+
+	t.Run("otlp grpc without endpoint", func(t *testing.T) {
+		spanExporter, err := oteltracer.NewTracerExporter("otlp_grpc", oteltracer.WithOTLPGrpcEndpoint(""))
 		assert.Nil(t, spanExporter)
 		assert.Error(t, err)
 	})
