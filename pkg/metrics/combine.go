@@ -1,10 +1,9 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
-
-	"go.uber.org/multierr"
 )
 
 type CombineOpt func(*Combine) error
@@ -100,7 +99,7 @@ func (c *Combine) Close() error {
 	var err error
 	for _, metric := range c.metrics {
 		if _err := metric.Close(); _err != nil {
-			err = multierr.Append(err, _err)
+			err = errors.Join(err, _err)
 		}
 	}
 

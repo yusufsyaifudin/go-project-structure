@@ -7,10 +7,66 @@ on:
       - master
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+
+      - name: Run tests
+        run: go test -v -race -coverprofile coverage.cov -cover ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.2
+          args: --print-resources-usage --verbose --timeout=30m ./...
+
   # define job to build and publish docker image
   build-and-push-docker-image:
     name: Build Docker image and push to repositories
-    # run only when code is compiling and tests are passing
+    # run only when test and lint pass
+    needs: [test, lint]
     runs-on: ubuntu-latest
 
     # steps to perform in job
@@ -23,8 +79,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/Library/Caches/go-build
-            %LocalAppData%\go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -44,9 +98,9 @@ jobs:
         run: echo ${{ steps.buildx.outputs.platforms }}
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
-          go-version: '>=1.19.0'
+          go-version: '1.26'
           check-latest: true
           cache: true
 
