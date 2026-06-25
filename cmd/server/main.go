@@ -15,15 +15,6 @@ import (
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
@@ -33,6 +24,12 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 )
 
 type Config struct {
@@ -203,7 +200,7 @@ func main() {
 		}
 
 		switch strings.TrimRight(req.URL.Path, "/") {
-		case "/favicon.ico":
+		case "/favicon.ico", "/ping":
 			return false
 		}
 
@@ -217,7 +214,8 @@ func main() {
 	// 1. Remove trailing slash, then
 	// 2. Add Prometheus middleware metrics, then
 	// 3. Continue from request tracer span (if exist in request header) or create new tracer span, then
-	// 4. Add middleware log!
+	// 4. Inject a non-exported span for filtered routes (so handler logs always carry trace_id), then
+	// 5. Add middleware log!
 
 	// Add logger middleware
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
@@ -225,6 +223,12 @@ func main() {
 		httpservermw.LogMwWithTracer(otel.GetTracerProvider()),
 		httpservermw.LogMwWithFilter(filterLogEndpoint),
 	)
+
+	// For routes filtered from otelhttp (e.g. /ping used as k8s readiness probe), otelhttp skips
+	// span creation entirely, leaving a zero trace_id in any handler logs. SpanInjectorMiddleware
+	// fills that gap: it starts a NeverSample span (real TraceID/SpanID, never exported) so that
+	// slog.DebugContext and similar calls inside those handlers still produce meaningful trace context.
+	serverMux = httpservermw.SpanInjectorMiddleware(serverMux, filterLogEndpoint)
 
 	// Propagate OpenTelemetry tracing
 	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
@@ -261,9 +265,18 @@ func main() {
 	serverMux = httpservermw.RemoveTrailingSlash(serverMux)
 
 	httpPortStr := fmt.Sprintf(":%d", cfg.HTTPPort)
+
+	// Enable HTTP/1.1, TLS HTTP/2, and cleartext HTTP/2 (h2c) using the Go 1.24+ Protocols field,
+	// replacing the deprecated golang.org/x/net/http2/h2c package.
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	httpServer := &http.Server{
-		Addr:    httpPortStr,
-		Handler: h2c.NewHandler(serverMux, &http2.Server{}), // HTTP/2 Cleartext handler
+		Addr:      httpPortStr,
+		Handler:   serverMux,
+		Protocols: &protocols,
 	}
 
 	var errChan = make(chan error, 1)
