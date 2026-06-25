@@ -4,23 +4,22 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
-var noopTracer = trace.NewNoopTracerProvider()
+var noopTracer = noop.NewTracerProvider()
 
 var roundTripperInstance = &roundTripper{
 	base:           http.DefaultTransport,
 	msg:            "request logger",
-	logger:         ylog.NewNoop(),
+	logger:         slog.Default(),
 	tracerProvider: noopTracer,
 	tracer:         noopTracer.Tracer(instrumentationName),
 }
@@ -61,7 +60,7 @@ func TestWithLogger(t *testing.T) {
 	})
 
 	t.Run("on non-nil", func(t *testing.T) {
-		opt := WithLogger(ylog.NewNoop())
+		opt := WithLogger(slog.Default())
 		err := opt(roundTripperInstance)
 		assert.NoError(t, err)
 	})

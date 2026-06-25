@@ -2,25 +2,36 @@ package httpclientmw
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/multierr"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
 	instrumentationName = "github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 )
+
+// OutgoingLog holds log data for an outgoing HTTP request or response.
+type OutgoingLog struct {
+	Method      string            `json:"method,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Path        string            `json:"path,omitempty"`
+	StatusCode  int               `json:"statusCode,omitempty"`
+	Header      map[string]string `json:"header,omitempty"`
+	Body        any               `json:"body,omitempty"`
+	BodyLen     int64             `json:"bodyLen,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	ElapsedTime int64             `json:"elapsedTime,omitempty"`
+}
 
 type Opt func(*roundTripper) error
 
@@ -49,11 +60,11 @@ func WithMessage(msg string) Opt {
 	}
 }
 
-// WithLogger set logger instance for this http.Client logger.
-func WithLogger(logger ylog.Logger) Opt {
+// WithLogger set logger instance for this http.Client slog.
+func WithLogger(logger *slog.Logger) Opt {
 	return func(tripper *roundTripper) error {
 		if logger == nil {
-			tripper.logger = ylog.NewNoop()
+			tripper.logger = slog.Default()
 			return nil
 		}
 
@@ -66,7 +77,7 @@ func WithLogger(logger ylog.Logger) Opt {
 func WithTracer(t trace.TracerProvider) Opt {
 	return func(tripper *roundTripper) error {
 		if t == nil {
-			tripper.tracerProvider = trace.NewNoopTracerProvider()
+			tripper.tracerProvider = noop.NewTracerProvider()
 			return nil
 		}
 
@@ -79,7 +90,7 @@ func WithTracer(t trace.TracerProvider) Opt {
 type roundTripper struct {
 	base           http.RoundTripper
 	msg            string
-	logger         ylog.Logger
+	logger         *slog.Logger
 	tracerProvider trace.TracerProvider
 	tracer         trace.Tracer
 }
@@ -93,12 +104,12 @@ func newTracer(tp trace.TracerProvider) trace.Tracer {
 // NewHttpRoundTripper return http.RoundTripper to be used as "middleware" in http.Client
 // to log any outgoing http request.
 func NewHttpRoundTripper(opts ...Opt) http.RoundTripper {
-	noopTracer := trace.NewNoopTracerProvider()
+	noopTracer := noop.NewTracerProvider()
 
 	instance := &roundTripper{
 		base:           http.DefaultTransport,
 		msg:            "request logger",
-		logger:         ylog.NewNoop(),
+		logger:         slog.Default(),
 		tracerProvider: noopTracer,
 		tracer:         newTracer(noopTracer),
 	}
@@ -121,134 +132,121 @@ func (r *roundTripper) applyConfig() {
 
 // RoundTrip do a http.RoundTrip and log the request/response body.
 func (r *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, fmt.Errorf("http: nil Request")
+	}
+
 	t0 := time.Now()
+	ctx := req.Context()
 
-	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-
-	// create new span for this request
-	var parentCtx = context.Background()
-	if req != nil && req.Context() != nil {
-		parentCtx = req.Context()
+	reqURL := req.URL
+	if reqURL == nil {
+		reqURL = &url.URL{}
 	}
 
-	var parentSpan trace.Span
-	parentCtx, parentSpan = r.tracer.Start(parentCtx, "Capture http.RoundTrip request")
-	defer parentSpan.End() // ending the request span
+	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("HTTP %s %s", req.Method, reqURL.EscapedPath()))
+	defer span.End()
 
-	if req != nil {
-		// extract from parent request header
-		parentCtx = propagator.Extract(parentCtx, propagation.HeaderCarrier(req.Header))
-
-		// Inject header needed to pass through the OpenTelemetry span context.
-		propagator.Inject(parentCtx, propagation.HeaderCarrier(req.Header))
-	}
-
+	// Capture outgoing request body, then restore it so the base transport can read it.
 	var (
-		errCum error // final error
-
-		reqBodyBuf      = &bytes.Buffer{}
-		reqBodyErr      error
-		reqBodyCaptured interface{}
+		reqBodyBuf = &bytes.Buffer{}
+		reqBodyLen int64
+		reqErrCum  error
 	)
 
-	if req != nil && req.Body != nil {
-
-		_, reqBodyErr = io.Copy(reqBodyBuf, req.Body)
-		if reqBodyErr != nil {
-			errCum = multierr.Append(errCum, fmt.Errorf("error copy request body: %w", reqBodyErr))
+	if req.Body != nil {
+		if n, err := io.Copy(reqBodyBuf, req.Body); err != nil {
+			reqErrCum = errors.Join(reqErrCum, fmt.Errorf("copy request body: %w", err))
 			reqBodyBuf = &bytes.Buffer{}
+		} else {
+			reqBodyLen = n
 		}
 
-		if _err := req.Body.Close(); _err != nil {
-			errCum = multierr.Append(errCum, fmt.Errorf("error closing request body: %w", _err))
+		if err := req.Body.Close(); err != nil {
+			reqErrCum = errors.Join(reqErrCum, fmt.Errorf("close request body: %w", err))
 		}
 
-		req.Body = io.NopCloser(reqBodyBuf)
+		req.Body = io.NopCloser(bytes.NewReader(reqBodyBuf.Bytes()))
 	}
 
-	// use json.Unmarshal instead of json.NewDecoder to make sure we can re-read the buffer
-	if _err := json.Unmarshal(reqBodyBuf.Bytes(), &reqBodyCaptured); _err != nil && reqBodyBuf.Len() > 0 {
-		reqBodyCaptured = reqBodyBuf.String()
+	var reqBodyCaptured any
+	if reqBodyBuf.Len() > 0 {
+		if err := json.Unmarshal(reqBodyBuf.Bytes(), &reqBodyCaptured); err != nil {
+			reqErrCum = errors.Join(reqErrCum, fmt.Errorf("unmarshal request body: %w", err))
+			reqBodyCaptured = reqBodyBuf.String()
+		}
 	}
 
-	var (
-		respOriginal *http.Response // round trip response
-		roundTripErr error          // round trip error
-	)
-
-	if req != nil {
-		respOriginal, roundTripErr = r.base.RoundTrip(req.WithContext(parentCtx))
-	} else {
-		roundTripErr = fmt.Errorf("cannot do round-tripper request because *http.Request is nil")
+	reqLog := OutgoingLog{
+		Method:  req.Method,
+		Host:    req.Host,
+		Path:    reqURL.Path,
+		Header:  toSimpleMap(req.Header),
+		Body:    reqBodyCaptured,
+		BodyLen: reqBodyLen,
+	}
+	if reqErrCum != nil {
+		reqLog.Error = reqErrCum.Error()
 	}
 
+	r.logger.InfoContext(ctx, r.msg, slog.Any("request", reqLog))
+
+	resp, roundTripErr := r.base.RoundTrip(req.WithContext(ctx))
 	if roundTripErr != nil {
-		errCum = multierr.Append(errCum, fmt.Errorf("error doing actual request: %w", roundTripErr))
+		return resp, roundTripErr
 	}
 
+	if resp == nil {
+		return nil, nil
+	}
+
+	// Capture response body, then restore it so the caller can read it.
 	var (
-		respBodyCaptured interface{}
-		respBodyBuf      = &bytes.Buffer{}
-		respErrBody      error
+		respBodyBuf = &bytes.Buffer{}
+		respBodyLen int64
+		respErrCum  error
 	)
 
-	if respOriginal != nil && respOriginal.Body != nil {
-		_, respErrBody = io.Copy(respBodyBuf, respOriginal.Body)
-		if respErrBody != nil {
-			errCum = multierr.Append(errCum, fmt.Errorf("error copy response body: %w", respErrBody))
+	if resp.Body != nil {
+		if n, err := io.Copy(respBodyBuf, resp.Body); err != nil {
+			respErrCum = errors.Join(respErrCum, fmt.Errorf("copy response body: %w", err))
 			respBodyBuf = &bytes.Buffer{}
+		} else {
+			respBodyLen = n
 		}
 
-		if _err := respOriginal.Body.Close(); _err != nil {
-			errCum = multierr.Append(errCum, fmt.Errorf("error closing response body: %w", _err))
+		if err := resp.Body.Close(); err != nil {
+			respErrCum = errors.Join(respErrCum, fmt.Errorf("close response body: %w", err))
 		}
 
-		respOriginal.Body = io.NopCloser(respBodyBuf)
+		resp.Body = io.NopCloser(bytes.NewReader(respBodyBuf.Bytes()))
 	}
 
-	// use json.Unmarshal instead of json.NewDecoder to make sure we can re-read the buffer
-	if _err := json.Unmarshal(respBodyBuf.Bytes(), &respBodyCaptured); _err != nil && respBodyBuf.Len() > 0 {
-		respBodyCaptured = respBodyBuf.String()
-	}
-
-	accessLog := ylog.AccessLogData{
-		ElapsedTime: time.Since(t0).Nanoseconds(),
-	}
-
-	// append to map only when the http.Request is not nil
-	if req != nil {
-		accessLog.Method = req.Method
-		accessLog.Request = &ylog.HTTPData{
-			Header: toSimpleMap(req.Header),
-			Body:   reqBodyCaptured,
+	var respBodyCaptured any
+	if respBodyBuf.Len() > 0 {
+		if err := json.Unmarshal(respBodyBuf.Bytes(), &respBodyCaptured); err != nil {
+			respErrCum = errors.Join(respErrCum, fmt.Errorf("unmarshal response body: %w", err))
+			respBodyCaptured = respBodyBuf.String()
 		}
 	}
 
-	if req != nil && req.URL != nil {
-		accessLog.Host = req.URL.Host
-		accessLog.Path = req.URL.EscapedPath()
+	respLog := OutgoingLog{
+		Method:      req.Method,
+		Host:        req.Host,
+		Path:        reqURL.Path,
+		StatusCode:  resp.StatusCode,
+		Header:      toSimpleMap(resp.Header),
+		Body:        respBodyCaptured,
+		BodyLen:     respBodyLen,
+		ElapsedTime: time.Since(t0).Milliseconds(),
+	}
+	if respErrCum != nil {
+		respLog.Error = respErrCum.Error()
 	}
 
-	// append to map only when the http.Response is not nil
-	if respOriginal != nil {
-		accessLog.Response = &ylog.HTTPData{
-			StatusCode: respOriginal.StatusCode,
-			Header:     toSimpleMap(respOriginal.Header),
-			Body:       respBodyCaptured,
-		}
-	}
+	r.logger.InfoContext(ctx, r.msg, slog.Any("response", respLog))
 
-	// append error if any
-	if errCum != nil {
-		accessLog.Error = errCum.Error()
-
-		parentSpan.RecordError(errCum)
-		parentSpan.SetStatus(codes.Error, "some error occurred during capturing log")
-	}
-
-	r.logger.Access(parentCtx, r.msg, accessLog)
-
-	return respOriginal, roundTripErr
+	return resp, nil
 }
 
 // toSimpleMap converts http.Header which as array of string as value to simple string.

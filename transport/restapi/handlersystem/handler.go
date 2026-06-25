@@ -1,16 +1,14 @@
 package handlersystem
 
 import (
+	"log/slog"
 	"net/http"
 	"runtime"
 	"time"
 
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
-
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
 )
@@ -42,21 +40,10 @@ func WithStartupTime(t time.Time) Opt {
 	}
 }
 
-func WithObservability(mgr observability.Observability) Opt {
-	return func(handler *SystemHandler) error {
-		if mgr == nil {
-			return nil
-		}
-		handler.observability = mgr
-		return nil
-	}
-}
-
 type SystemHandler struct {
 	buildCommitID string
 	buildTime     time.Time
 	startupTime   time.Time
-	observability observability.Observability
 }
 
 // Ensure SystemHandler implements restapi.EchoRouter to successfully register endpoint to Echo framework.
@@ -94,10 +81,8 @@ func (s *SystemHandler) Ping(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// This is example where you want to propagate static field in this ping handler context.
-	// Also to give you the example that you will get the "trace_id" and "span_id" in the log
+	// Also, to give you the example that you will get the "trace_id" and "span_id" in the log
 	// even you disable OpenTelemetry by setting the OTEL_EXPORTER to NOOP.
-	logger := s.observability.Logger().WithStaticFields(ylog.KV("handler_name", "ping"))
-	logger.Info(ctx, "my handler log")
 
 	// Instead of using s.observability.Tracer().Start(ctx, "Ping Handler")
 	// Please use SpanFromContext from go.opentelemetry.io/otel/trace
@@ -114,8 +99,14 @@ func (s *SystemHandler) Ping(c echo.Context) error {
 	// Get new span and child context from TracerProvider in propagated Span.
 	// Name of tracer doesn't need the current package,
 	// but, for make it consistent use current package name.
-	_, spanChild := span.TracerProvider().Tracer(instrumentationName).Start(ctx, "Ping Handler")
+	var spanChild trace.Span
+	ctx, spanChild = span.TracerProvider().Tracer(instrumentationName).Start(ctx, "Ping Handler")
 	defer spanChild.End()
+
+	// Please note, that if we SKIP the OpenTelemetry tracer,
+	// this log MAY still print if you set slog.Level to Debug
+	// and the `trace_id` will become zero.
+	slog.DebugContext(ctx, "ping handler called")
 
 	return c.JSON(http.StatusOK, respbuilder.Ok(respbuilder.Success, PingResp{
 		CommitHash:   s.buildCommitID,

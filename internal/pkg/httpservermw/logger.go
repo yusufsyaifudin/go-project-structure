@@ -1,22 +1,19 @@
 package httpservermw
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"net/http"
-	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/multierr"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
@@ -32,19 +29,11 @@ type LoggerOpt func(*LogMiddleware) error
 // Otherwise, if return true, it will be included in log.
 type Filter func(*http.Request) bool
 
-// LogMwWithMessage change message on logger.
-func LogMwWithMessage(msg string) LoggerOpt {
-	return func(tripper *LogMiddleware) error {
-		tripper.msg = msg
-		return nil
-	}
-}
-
 // LogMwWithLogger set logger
-func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
+func LogMwWithLogger(logger *slog.Logger) LoggerOpt {
 	return func(tripper *LogMiddleware) error {
 		if logger == nil {
-			tripper.logger = ylog.NewNoop()
+			tripper.logger = slog.Default()
 			return nil
 		}
 
@@ -57,11 +46,31 @@ func LogMwWithLogger(logger ylog.Logger) LoggerOpt {
 func LogMwWithTracer(t trace.TracerProvider) LoggerOpt {
 	return func(tripper *LogMiddleware) error {
 		if t == nil {
-			tripper.tracerProvider = trace.NewNoopTracerProvider()
+			tripper.tracerProvider = noop.NewTracerProvider()
 			return nil
 		}
 
 		tripper.tracerProvider = t
+		return nil
+	}
+}
+
+// LogMwWithTracerSpanStartOption add span start option to the span created by this middleware.
+func LogMwWithTracerSpanStartOption(opts ...trace.SpanStartOption) LoggerOpt {
+	return func(tripper *LogMiddleware) error {
+		if opts == nil {
+			tripper.tracerProvider = noop.NewTracerProvider()
+			return nil
+		}
+
+		for _, opt := range opts {
+			if opt == nil {
+				continue
+			}
+
+			tripper.spanStartOptions = append(tripper.spanStartOptions, opt)
+		}
+
 		return nil
 	}
 }
@@ -75,18 +84,18 @@ func LogMwWithFilter(f Filter) LoggerOpt {
 }
 
 type LogMiddleware struct {
-	msg            string
-	logger         ylog.Logger
-	tracerProvider trace.TracerProvider
-	filter         Filter
+	logger           *slog.Logger
+	tracerProvider   trace.TracerProvider
+	spanStartOptions []trace.SpanStartOption
+	filter           Filter
 }
 
 // LoggingMiddleware is a middleware that logs incoming requests
 func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &LogMiddleware{
-		msg:            "request logger",
-		logger:         ylog.NewNoop(),
-		tracerProvider: trace.NewNoopTracerProvider(),
+		logger:           slog.Default(),
+		tracerProvider:   noop.NewTracerProvider(),
+		spanStartOptions: make([]trace.SpanStartOption, 0),
 	}
 
 	for _, opt := range opts {
@@ -97,10 +106,13 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	}
 
 	tracer := l.tracerProvider.Tracer(instrumentationName)
+	l.spanStartOptions = append(l.spanStartOptions, trace.WithSpanKind(trace.SpanKindServer))
 
 	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
 	fn := func(w http.ResponseWriter, req *http.Request) {
+		t0 := time.Now()
+
 		if l.filter != nil && req != nil {
 			if !l.filter(req) {
 				next.ServeHTTP(w, req)
@@ -108,24 +120,33 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 			}
 		}
 
-		t0 := time.Now()
-
 		parentCtx := context.Background()
-		if req != nil && req.Context() != nil {
+		if req == nil {
+			next.ServeHTTP(w, req)
+			return
+		}
+
+		if req.Context() != nil {
 			parentCtx = req.Context()
 
 			// extract from request header if any span pass through from request context via header
 			parentCtx = propagator.Extract(parentCtx, propagation.HeaderCarrier(req.Header))
 		}
 
-		// parent span for this logging middleware
-		spanName := "[Log MW]"
-		if req != nil {
-			spanName = fmt.Sprintf("%s %s [Log MW]", req.Method, req.URL.EscapedPath())
+		// Always clone to mitigate issues.
+		req = req.Clone(parentCtx)
+
+		reqURL := req.URL
+		if reqURL == nil {
+			reqURL = &url.URL{}
 		}
 
+		// parent span for this logging middleware
+		spanName := fmt.Sprintf("%s %s [Log MW]", req.Method, reqURL.EscapedPath())
+
 		var parentSpan trace.Span
-		parentCtx, parentSpan = tracer.Start(parentCtx, spanName)
+		parentCtx, parentSpan = tracer.Start(parentCtx, spanName, l.spanStartOptions...)
+		parentSpan.SetAttributes(semconv.URLFull(reqURL.String()))
 		defer parentSpan.End()
 
 		// create child span for this request and pass it to the actual handler span.
@@ -133,120 +154,71 @@ func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 		reqCtx, reqSpan := tracer.Start(parentCtx, "Log middleware")
 		defer reqSpan.End()
 
-		captReqCtx, captReqSpan := tracer.Start(reqCtx, "Capture request")
-		var (
-			errCum error // final cumulative error
-
-			reqBodyBuf      = &bytes.Buffer{}
-			reqBodyErr      error
-			reqBodyCaptured interface{}
-		)
-
-		if req != nil && req.Body != nil {
-			_, reqBodyErr = io.Copy(reqBodyBuf, req.Body)
-			if reqBodyErr != nil {
-				errCum = multierr.Append(errCum, fmt.Errorf("error copy request body: %w", reqBodyErr))
-				reqBodyBuf = &bytes.Buffer{}
-			}
-
-			if _err := req.Body.Close(); _err != nil {
-				errCum = multierr.Append(errCum, fmt.Errorf("error closing request body: %w", _err))
-			}
-
-			req.Body = io.NopCloser(reqBodyBuf)
-		}
-
-		// use json.Unmarshal instead of json.NewDecoder to make sure we can re-read the buffer
-		if _err := json.Unmarshal(reqBodyBuf.Bytes(), &reqBodyCaptured); _err != nil && reqBodyBuf.Len() > 0 {
-			reqBodyCaptured = reqBodyBuf.String()
-		}
-
-		accessLog := ylog.AccessLogData{}
-
 		// append to map only when the http.Request is not nil
-		if req != nil {
-			accessLog.Method = req.Method
-			accessLog.Request = &ylog.HTTPData{
-				Header: HttpHeaderToSimpleMap(req.Header),
-				Body:   reqBodyCaptured,
-			}
-		}
-
-		if req != nil && req.URL != nil {
-			accessLog.Host = req.URL.Host
-			accessLog.Path = req.URL.String()
-		}
+		reqCtx, reqSpan = tracer.Start(reqCtx, "Capture request")
+		captReqCtx := captureRequest(reqCtx, &captureRequestOpt{
+			T0:               t0,
+			Request:          req,
+			Tracer:           tracer,
+			SpanStartOptions: l.spanStartOptions,
+			Logger:           l.logger,
+		})
 
 		// ending the capture request span right before we do actual ServeHTTP.
 		// meaning that *this* span only to capture how many times needed to get the request body
-		captReqSpan.End()
-
-		// Pass the request to the next handler
-		respRec := httptest.NewRecorder()
-
-		// use the child request span context, so the handler will continue the child span for this request context
-		next.ServeHTTP(respRec, req.WithContext(captReqCtx))
+		reqCtx.Done()
+		reqSpan.End()
 
 		// create new span for this response span.
 		// response span MUST continue from parent span, because it's process is scoped in this middleware only.
+		var respCtx context.Context
 		var respSpan trace.Span
-		_, respSpan = tracer.Start(reqCtx, "Capture response")
-		defer respSpan.End() // done response span
+		respCtx, respSpan = tracer.Start(reqCtx, "Capture response")
+		defer func() {
+			respCtx.Done()
+			respSpan.End() // done response span
+		}()
 
-		var (
-			respBodyCaptured interface{}
-			respBodyBuf      = &bytes.Buffer{}
-		)
-
-		if respRec.Result() != nil && respRec.Body != nil {
-			respBodyBuf = respRec.Body
-		}
-
-		// use json.Unmarshal instead of json.NewDecoder to make sure we can re-read the buffer
-		if _err := json.Unmarshal(respBodyBuf.Bytes(), &respBodyCaptured); _err != nil && respBodyBuf.Len() > 0 {
-			respBodyCaptured = respBodyBuf.String()
-		}
+		// Pass the request to the next handler
+		respRec := newResponseWriter(w)
 
 		// inject Traceparent to response recorder header,
 		// next it will write to actual writer response header
-		propagator.Inject(parentCtx, propagation.HeaderCarrier(respRec.Header()))
+		propagator.Inject(captReqCtx, propagation.HeaderCarrier(respRec.Header()))
 
-		// append to map only when the http.Response is not nil
-		httpStatusCode := http.StatusInternalServerError
-		if respRec.Result() != nil {
-			httpStatusCode = respRec.Result().StatusCode
-			accessLog.Response = &ylog.HTTPData{
-				StatusCode: respRec.Result().StatusCode,
-				Header:     HttpHeaderToSimpleMap(respRec.Header()),
-				Body:       respBodyCaptured,
-			}
+		// use the child request span context, so the handler will continue the child span for this request context
+		next.ServeHTTP(respRec, req.WithContext(reqCtx))
+
+		respBodyLen := int64(len(respRec.body))
+
+		// Log or process the captured status code, headers, and body
+		respLog := AccessLog{
+			Method:      req.Method,
+			Host:        req.Host,
+			Path:        reqURL.Path,
+			StatusCode:  respRec.statusCode,
+			Header:      HttpHeaderToSimpleMap(respRec.headers),
+			Body:        nil,
+			BodyLen:     respBodyLen,
+			QueryParams: nil,
+			Error:       "",
+			ElapsedTime: time.Since(t0).Milliseconds(),
 		}
 
-		// write to actual response writer
-		for k, v := range respRec.Header() {
-			w.Header().Set(k, strings.Join(v, " "))
+		var respBodyCaptured any
+		var respBodyDecoderErr error
+		if respBodyLen > 0 {
+			respBodyDecoderErr = json.Unmarshal(respRec.body, &respBodyCaptured)
 		}
 
-		w.WriteHeader(httpStatusCode)
-
-		// write response body
-		if _, _err := w.Write(respBodyBuf.Bytes()); _err != nil {
-			errCum = multierr.Append(errCum, fmt.Errorf("failed to write to actual response writer: %w", _err))
+		if respBodyDecoderErr != nil {
+			respBodyCaptured = string(respRec.body) // Fallback with the real request body string
+			respLog.Error = fmt.Sprintf("error unmarshal response body: %s", respBodyDecoderErr.Error())
 		}
 
-		// append error if any
-		if errCum != nil {
-			accessLog.Error = errCum.Error()
+		respLog.Body = respBodyCaptured
 
-			respSpan.RecordError(errCum)
-			respSpan.SetStatus(codes.Error, "some error occurred during capturing log")
-		}
-
-		accessLog.ElapsedTime = time.Since(t0).Nanoseconds()
-
-		// write log here
-		l.logger.Access(parentCtx, l.msg, accessLog)
-
+		l.logger.InfoContext(respCtx, "capture incoming response payload", slog.Any("response", respLog))
 	}
 
 	return http.HandlerFunc(fn)

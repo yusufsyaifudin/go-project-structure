@@ -3,6 +3,7 @@ package httpservermw
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,13 +11,12 @@ import (
 	"time"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type PrometheusOpt func(*Prometheus) error
 
 // PrometheusWithMetric set metrics.Metric
-func PrometheusWithMetric(m *metrics.Prometheus) PrometheusOpt {
+func PrometheusWithMetric(m metrics.Metric) PrometheusOpt {
 	return func(p *Prometheus) error {
 		p.metric = m
 		return nil
@@ -27,8 +27,8 @@ type Prometheus struct {
 	baseMux http.Handler // required base multiplexer net/http server
 
 	// options must be passed via PrometheusOpt function
-	logger ylog.Logger
-	metric *metrics.Prometheus
+	logger *slog.Logger
+	metric metrics.Metric
 }
 
 var _ http.Handler = (*Prometheus)(nil)
@@ -43,7 +43,7 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 
 	prom := &Prometheus{
 		baseMux: baseMux,
-		logger:  ylog.NewNoop(),
+		logger:  slog.Default(),
 	}
 
 	for _, opt := range opts {
@@ -60,7 +60,19 @@ func PrometheusMiddleware(baseMux http.Handler, opts ...PrometheusOpt) (*Prometh
 func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	t0 := time.Now()
-	if req != nil && req.URL != nil && req.URL.Path == "/metrics" && p.metric.HandlerFunc() != nil {
+	if req == nil {
+		p.logger.Error("prometheus middleware: request is nil")
+		p.metric.HandlerFunc().ServeHTTP(w, req)
+		return
+	}
+
+	if req.URL == nil {
+		p.logger.Error("prometheus middleware: request URL is nil")
+		p.metric.HandlerFunc().ServeHTTP(w, req)
+		return
+	}
+
+	if req.URL != nil && req.URL.Path == "/metrics" && p.metric.HandlerFunc() != nil {
 		// If user request /metrics endpoint,
 		// then return the Prometheus metrics.
 
@@ -103,13 +115,13 @@ func (p *Prometheus) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Write response body.
 	if n, err := w.Write(respRec.Body.Bytes()); err != nil {
 		ctx := context.Background()
-		if req != nil && req.Context() != nil {
+		if req.Context() != nil {
 			ctx = req.Context()
 		}
 
-		p.logger.Error(ctx, "prometheus middleware writing response body error",
-			ylog.KV("bytes_written", n),
-			ylog.KV("error", err),
+		p.logger.ErrorContext(ctx, "prometheus middleware writing response body error",
+			slog.Int("bytes_written", n),
+			slog.Any("error", err),
 		)
 	}
 }

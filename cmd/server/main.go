@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,18 +16,17 @@ import (
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
@@ -39,7 +39,6 @@ type Config struct {
 	HTTPPort        int    `env:"PORT" envDefault:"3000" validate:"required"`
 	LogLevel        string `env:"LOG_LEVEL" envDefault:"DEBUG" validate:"required"`
 	OtelExporter    string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP, OTLP_GRPC
-	OtelJaegerURL   string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
 	OtelOtlpURL     string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
 	OtelOtlpGrpcURL string `env:"OTEL_EXPORTER_OTLP_GRPC_ENDPOINT" envDefault:"localhost:4317" validate:"required_if=OtelExporter OTLP_GRPC"`
 }
@@ -69,82 +68,95 @@ func main() {
 		return
 	}
 
+	// ** Prepare logger using slog
+	loggerOpt := &slog.HandlerOptions{
+		AddSource:   true,
+		Level:       slog.LevelDebug,
+		ReplaceAttr: nil,
+	}
+	var loggerHandler slog.Handler = slog.NewJSONHandler(os.Stdout, loggerOpt)
+
 	// ** Prepare logger using ylog
-	logger := ylog.SetupZapLogger(cfg.LogLevel).WithStaticFields(
-		ylog.KV("service_name", serviceName),
-		ylog.KV("service_build_commit_hash", buildCommitID),
-		ylog.KV("service_build_ts", buildTime),
-	)
+	yloggerOpt := &ylog.OpenTelemetryOption{
+		ContextExtractor: func(ctx context.Context) []slog.Attr {
+			return nil
+		},
+	}
+
+	loggerHandler = ylog.NewOTEL(loggerHandler, yloggerOpt)
+	logger := slog.New(loggerHandler)
+	slog.SetDefault(logger)
+
+	// Setup global error handler for OpenTelemetry SDK.
+	// So, any error from OpenTelemetry will also comply with the standard slog.
+	otel.SetErrorHandler(&otelErrHandler{})
+
+	otelResource := newResource(systemCtx, serviceName)
 
 	// prepare tracer exporter, whether using stdout or jaeger
-	tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(ylog.WrapIOWriter(logger,
-			ylog.LoggerIOWriterWithContext(systemCtx),
-			ylog.LoggerIOWriterWithMsg("OpenTelemetry tracer stdout"),
-		)),
-		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
-		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
-		oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
-		oteltracer.WithHttpRoundTripper(httpclientmw.NewLogMw(
-			httpclientmw.LogMwWithMessage("OpenTelemetry outgoing request"),
-			httpclientmw.LogMwWithLogger(logger),
-		)),
-	)
+	{
+		tracerExporter, tracerExporterErr := oteltracer.NewTracerExporter(cfg.OtelExporter,
+			oteltracer.WithLogger(slog.Default()),
+			oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
+			oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
+			oteltracer.WithHttpRoundTripper(
+				httpclientmw.NewHttpRoundTripper(
+					httpclientmw.WithBaseRoundTripper(&http.Transport{}),
+				),
+			),
+		)
 
-	defer func() {
-		if tracerExporter == nil {
+		defer func() {
+			if tracerExporter == nil {
+				return
+			}
+
+			if _err := tracerExporter.Shutdown(systemCtx); _err != nil {
+				slog.ErrorContext(systemCtx, "prepare exporter on shutdown error", slog.Any("error", _err))
+			}
+		}()
+
+		if tracerExporterErr != nil {
+			slog.ErrorContext(systemCtx, "prepare exporter error", slog.Any("error", tracerExporterErr))
 			return
 		}
 
-		if _err := tracerExporter.Shutdown(systemCtx); _err != nil {
-			logger.Error(systemCtx, "prepare exporter on shutdown error", ylog.KV("error", _err))
-		}
-	}()
+		slog.ErrorContext(systemCtx, fmt.Sprintf("using %s as OpenTelemetry span exporter", cfg.OtelExporter))
 
-	if tracerExporterErr != nil {
-		logger.Error(systemCtx, "prepare exporter error", ylog.KV("error", tracerExporterErr))
-		return
+		tracerProvider := trace.NewTracerProvider(
+			trace.WithBatcher(tracerExporter),
+			trace.WithResource(otelResource),
+			trace.WithSampler(trace.AlwaysSample()),
+		)
+		defer func() {
+			if _err := tracerProvider.Shutdown(systemCtx); _err != nil {
+				slog.ErrorContext(systemCtx, "shutdown tracer error", slog.Any("error", _err))
+			}
+		}()
+
+		// Set as global OpenTelemetry tracer provider.
+		otel.SetTracerProvider(tracerProvider)
 	}
 
-	logger.Info(systemCtx, fmt.Sprintf("using %s as OpenTelemetry span exporter", cfg.OtelExporter))
-
-	tracerProvider := trace.NewTracerProvider(
-		trace.WithBatcher(tracerExporter),
-		trace.WithResource(newResource(systemCtx, logger, serviceName)),
-		trace.WithSampler(trace.AlwaysSample()),
-	)
-	defer func() {
-		if _err := tracerProvider.Shutdown(context.Background()); _err != nil {
-			logger.Error(systemCtx, "shutdown tracer error", ylog.KV("error", _err))
-		}
-	}()
-
-	prometheusMetric, err := metrics.NewPrometheus(
-		metrics.PrometheusWithPrefix(serviceName + "_"),
-	)
-	if err != nil {
-		logger.Error(systemCtx, "cannot prepare prometheus metric", ylog.KV("error", err))
-		return
-	}
-
-	// combine metrics to various type of outputs (prometheus, statsd, etc)
 	var combinedMetrics metrics.Metric
-	combinedMetrics, err = metrics.NewCombinedMetrics(
-		metrics.CombineMetricAdd(prometheusMetric),
-	)
-	if err != nil {
-		logger.Error(systemCtx, "cannot combine metrics collector", ylog.KV("error", err))
-		return
-	}
+	{
+		var prometheusMetric metrics.Metric
+		prometheusMetric, err = metrics.NewPrometheus(
+			metrics.PrometheusWithPrefix(serviceName + "_"),
+		)
+		if err != nil {
+			slog.ErrorContext(systemCtx, "cannot prepare prometheus metric", slog.Any("error", err))
+			return
+		}
 
-	observeMgr, err := observability.NewManager(
-		observability.WithLogger(logger),
-		observability.WithTracerProvider(tracerProvider),
-		observability.WithMetric(combinedMetrics),
-	)
-	if err != nil {
-		logger.Error(systemCtx, "failed setup observability manager", ylog.KV("error", err))
-		return
+		// combine metrics to various type of outputs (prometheus, statsd, etc)
+		combinedMetrics, err = metrics.NewCombinedMetrics(
+			metrics.CombineMetricAdd(prometheusMetric),
+		)
+		if err != nil {
+			slog.ErrorContext(systemCtx, "cannot combine metrics collector", slog.Any("error", err))
+			return
+		}
 	}
 
 	startupTime := time.Now()
@@ -154,28 +166,25 @@ func main() {
 		handlersystem.WithBuildCommitID(buildCommitID),
 		handlersystem.WithBuildTime(buildTime),
 		handlersystem.WithStartupTime(startupTime),
-		handlersystem.WithObservability(observeMgr),
 	)
 	if err != nil {
-		logger.Error(systemCtx, "cannot prepare http handler for system router", ylog.KV("error", err))
+		slog.ErrorContext(systemCtx, "cannot prepare http handler for system router", slog.Any("error", err))
 		return
 	}
 
 	// ** setup server with graceful shutdown
-	logger.Info(systemCtx, "preparing server http...")
+	slog.InfoContext(systemCtx, "preparing server http...")
 	var serverMux http.Handler
 	serverMux, err = restapi.NewHTTP(
 		restapi.WithBuildCommitID(buildCommitID),
 		restapi.WithBuildTime(buildTime),
 		restapi.WithStartupTime(startupTime),
-		restapi.WithObservability(observeMgr),
 
 		// register all handler here
 		restapi.AddHandler(handlerSystem),
 	)
 	if err != nil {
-		err = fmt.Errorf("error prepare rest api server: %w", err)
-		logger.Error(systemCtx, err.Error())
+		slog.ErrorContext(systemCtx, "error prepare rest api server", slog.Any("error", err))
 		return
 	}
 
@@ -194,7 +203,7 @@ func main() {
 		}
 
 		switch strings.TrimRight(req.URL.Path, "/") {
-		case "/metrics":
+		case "/favicon.ico":
 			return false
 		}
 
@@ -213,8 +222,7 @@ func main() {
 	// Add logger middleware
 	serverMux = httpservermw.LoggingMiddleware(serverMux,
 		httpservermw.LogMwWithLogger(logger),
-		httpservermw.LogMwWithMessage("incoming request log"),
-		httpservermw.LogMwWithTracer(tracerProvider),
+		httpservermw.LogMwWithTracer(otel.GetTracerProvider()),
 		httpservermw.LogMwWithFilter(filterLogEndpoint),
 	)
 
@@ -224,7 +232,7 @@ func main() {
 		assets.AppName+"_server",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
 		otelhttp.WithPropagators(propagator),
-		otelhttp.WithTracerProvider(tracerProvider),
+		otelhttp.WithTracerProvider(otel.GetTracerProvider()),
 		otelhttp.WithFilter(filterLogEndpoint),
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			if r == nil {
@@ -242,10 +250,10 @@ func main() {
 	// Add Prometheus middleware metrics
 	// prepare middleware and handler for Prometheus at the same time
 	serverMux, err = httpservermw.PrometheusMiddleware(serverMux,
-		httpservermw.PrometheusWithMetric(prometheusMetric),
+		httpservermw.PrometheusWithMetric(combinedMetrics),
 	)
 	if err != nil {
-		logger.Error(systemCtx, "cannot prepare prometheus middleware", ylog.KV("error", err))
+		slog.ErrorContext(systemCtx, "cannot prepare prometheus middleware", slog.Any("error", err))
 		return
 	}
 
@@ -260,7 +268,7 @@ func main() {
 
 	var errChan = make(chan error, 1)
 	go func() {
-		logger.Info(systemCtx, fmt.Sprintf("starting http on port %s", httpPortStr))
+		slog.InfoContext(systemCtx, fmt.Sprintf("starting http on port %s", httpPortStr))
 		errChan <- httpServer.ListenAndServe()
 	}()
 
@@ -269,28 +277,38 @@ func main() {
 	select {
 	case s := <-signalChan:
 		msg := fmt.Sprintf("got an interrupt: %+v", s)
-		logger.Error(systemCtx, msg)
+		slog.ErrorContext(systemCtx, msg)
 	case _err := <-errChan:
 		if _err != nil {
 			msg := fmt.Sprintf("error while running server: %s", _err)
-			logger.Error(systemCtx, msg)
+			slog.ErrorContext(systemCtx, msg)
 		}
 	}
 }
 
 // newResource returns a resource describing this application.
-func newResource(ctx context.Context, logger ylog.Logger, serviceName string) *resource.Resource {
+func newResource(ctx context.Context, serviceName string) *resource.Resource {
 	r := resource.NewWithAttributes(
 		semconv.SchemaURL,
-		semconv.ServiceNameKey.String(serviceName),
-		semconv.ServiceVersionKey.String("v0.1.0"),
-		attribute.String("environment", "demo"),
+		semconv.ServiceName(serviceName),
+		semconv.ServiceVersion("v0.1.0"),
+		semconv.DeploymentEnvironmentName("demo"),
 	)
 
 	if r == nil {
-		logger.Error(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
+		slog.ErrorContext(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
 		return resource.Default()
 	}
 
 	return r
+}
+
+type otelErrHandler struct{}
+
+var _ otel.ErrorHandler = (*otelErrHandler)(nil)
+
+func (o *otelErrHandler) Handle(err error) {
+	if err != nil {
+		slog.ErrorContext(context.Background(), "OpenTelemetry error", slog.Any("error", err))
+	}
 }

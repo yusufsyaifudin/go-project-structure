@@ -3,16 +3,15 @@ package restapi
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/observability"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type HTTPConfig func(*HTTP) error
@@ -41,18 +40,6 @@ func WithStartupTime(t time.Time) HTTPConfig {
 	}
 }
 
-// WithObservability add observability manager
-func WithObservability(o observability.Observability) HTTPConfig {
-	return func(h *HTTP) error {
-		if o == nil {
-			return nil
-		}
-
-		h.observability = o
-		return nil
-	}
-}
-
 // AddHandler register the handler that implements EchoRouter.
 func AddHandler(r EchoRouter) HTTPConfig {
 	return func(h *HTTP) error {
@@ -74,10 +61,9 @@ type EchoRouter interface {
 }
 
 type HTTP struct {
-	buildCommitID string                      `validate:"-"`
-	buildTime     time.Time                   `validate:"-"`
-	startupTime   time.Time                   `validate:"required"`
-	observability observability.Observability `validate:"required"`
+	buildCommitID string    `validate:"-"`
+	buildTime     time.Time `validate:"-"`
+	startupTime   time.Time `validate:"required"`
 	handlers      []EchoRouter
 
 	echo *echo.Echo
@@ -97,7 +83,6 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 		buildCommitID: "not-exist",
 		buildTime:     time.Now(),
 		startupTime:   time.Now(),
-		observability: observability.NewNoop(),
 		handlers:      make([]EchoRouter, 0),
 		echo:          e,
 	}
@@ -151,6 +136,6 @@ func (h *HTTP) httpErrorHandler(err error, eCtx echo.Context) {
 
 	_err := eCtx.JSON(httpStatus, respbuilder.Error(respbuilder.ErrGeneral, err))
 	if _err != nil {
-		h.observability.Logger().Error(ctx, "echo.HTTPErrorHandler write json error", ylog.KV("error", _err))
+		slog.ErrorContext(ctx, "echo.HTTPErrorHandler write json error", slog.Any("error", _err))
 	}
 }

@@ -4,32 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 var logMwTest = &httpservermw.LogMiddleware{}
-
-func TestLogMwWithMessage(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		opt := httpservermw.LogMwWithMessage("")
-		err := opt(logMwTest)
-		assert.NoError(t, err)
-	})
-
-	t.Run("non-empty", func(t *testing.T) {
-		opt := httpservermw.LogMwWithMessage("message")
-		err := opt(logMwTest)
-		assert.NoError(t, err)
-	})
-}
 
 func TestLogMwWithLogger(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
@@ -39,7 +25,7 @@ func TestLogMwWithLogger(t *testing.T) {
 	})
 
 	t.Run("non-nil", func(t *testing.T) {
-		opt := httpservermw.LogMwWithLogger(ylog.NewNoop())
+		opt := httpservermw.LogMwWithLogger(slog.Default())
 		err := opt(logMwTest)
 		assert.NoError(t, err)
 	})
@@ -53,7 +39,7 @@ func TestLogMwWithTracer(t *testing.T) {
 	})
 
 	t.Run("non-nil", func(t *testing.T) {
-		opt := httpservermw.LogMwWithTracer(trace.NewNoopTracerProvider())
+		opt := httpservermw.LogMwWithTracer(noop.NewTracerProvider())
 		err := opt(logMwTest)
 		assert.NoError(t, err)
 	})

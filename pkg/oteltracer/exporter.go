@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
-	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -20,22 +19,13 @@ import (
 type ExporterOpt func(*ExporterOption) error
 
 // WithLogger set logger instance for the STDOUT span exporter.
-func WithLogger(logger io.Writer) ExporterOpt {
+func WithLogger(logger *slog.Logger) ExporterOpt {
 	return func(option *ExporterOption) error {
 		if logger == nil {
 			return fmt.Errorf("cannot use nil logger")
 		}
 
 		option.logger = logger
-		return nil
-	}
-}
-
-// WithJaegerEndpoint set Jaeger endpoint for type JAEGER span exporter.
-// Default to http://localhost:14268/api/traces
-func WithJaegerEndpoint(endpoint string) ExporterOpt {
-	return func(option *ExporterOption) error {
-		option.jaegerEndpoint = endpoint
 		return nil
 	}
 }
@@ -69,8 +59,7 @@ func WithHttpRoundTripper(r http.RoundTripper) ExporterOpt {
 }
 
 type ExporterOption struct {
-	logger           io.Writer
-	jaegerEndpoint   string
+	logger           *slog.Logger
 	otlpEndpoint     string
 	otlpGrpcEndpoint string
 	httpRoundTripper http.RoundTripper
@@ -80,8 +69,7 @@ type ExporterOption struct {
 // Default to noop exporter if no name or NOOP specified.
 func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, error) {
 	cfg := &ExporterOption{
-		logger:           os.Stdout,
-		jaegerEndpoint:   "http://localhost:14268/api/traces",
+		logger:           slog.Default(),
 		otlpEndpoint:     "localhost:4318",
 		otlpGrpcEndpoint: "localhost:4317",
 		httpRoundTripper: http.DefaultTransport,
@@ -94,23 +82,12 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 		}
 	}
 
-	httpClient := http.DefaultClient
+	httpClient := &http.Client{}
 	httpClient.Transport = cfg.httpRoundTripper
 
 	name = strings.TrimSpace(name)
 	name = strings.ToUpper(name)
 	switch name {
-	case "JAEGER":
-		endpoint := strings.TrimSpace(cfg.jaegerEndpoint)
-		if endpoint == "" {
-			return nil, fmt.Errorf("cannot use OpenTelemetry JAEGER if OTEL_EXPORTER_JAEGER_ENDPOINT is empty")
-		}
-
-		return jaeger.New(jaeger.WithCollectorEndpoint(
-			jaeger.WithEndpoint(endpoint),
-			jaeger.WithHTTPClient(httpClient),
-		))
-
 	case "OTLP":
 		endpoint := strings.TrimSpace(cfg.otlpEndpoint)
 		if endpoint == "" {
@@ -141,7 +118,7 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 
 	case "STDOUT":
 		return stdouttrace.New(
-			stdouttrace.WithWriter(cfg.logger),
+			stdouttrace.WithWriter(wrapToIO(cfg.logger)),
 			// Use human-readable output.
 			stdouttrace.WithPrettyPrint(),
 			// Do not print timestamps for the demo.
@@ -153,4 +130,19 @@ func NewTracerExporter(name string, opts ...ExporterOpt) (trace.SpanExporter, er
 	default:
 		return nil, fmt.Errorf("unknown name='%s' for OpenTelemetry span exporter", name)
 	}
+}
+
+type slogIO struct {
+	logger *slog.Logger
+}
+
+var _ io.Writer = (*slogIO)(nil)
+
+func wrapToIO(logger *slog.Logger) *slogIO {
+	return &slogIO{logger: logger}
+}
+
+func (s *slogIO) Write(p []byte) (n int, err error) {
+	s.logger.InfoContext(context.Background(), string(p))
+	return len(p), nil
 }

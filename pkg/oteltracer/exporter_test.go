@@ -1,7 +1,7 @@
 package oteltracer_test
 
 import (
-	"os"
+	"log/slog"
 	"testing"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
@@ -19,21 +19,7 @@ func TestWithLogger(t *testing.T) {
 	})
 
 	t.Run("not-nil", func(t *testing.T) {
-		opt := oteltracer.WithLogger(os.Stdout)
-		err := opt(tracerExporterText)
-		assert.NoError(t, err)
-	})
-}
-
-func TestWithJaegerEndpoint(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		opt := oteltracer.WithJaegerEndpoint("")
-		err := opt(tracerExporterText)
-		assert.NoError(t, err)
-	})
-
-	t.Run("not-nil", func(t *testing.T) {
-		opt := oteltracer.WithJaegerEndpoint("http://localhost:14268/api/traces")
+		opt := oteltracer.WithLogger(slog.Default())
 		err := opt(tracerExporterText)
 		assert.NoError(t, err)
 	})
@@ -76,7 +62,6 @@ func TestNewTracerExporter(t *testing.T) {
 
 	t.Run("available types", func(t *testing.T) {
 		types := []string{
-			"JAEGER",
 			"OTLP",
 			"OTLP_GRPC",
 			"STDOUT",
@@ -90,12 +75,6 @@ func TestNewTracerExporter(t *testing.T) {
 				assert.NoError(t, err)
 			})
 		}
-	})
-
-	t.Run("jaeger without endpoint", func(t *testing.T) {
-		spanExporter, err := oteltracer.NewTracerExporter("jaeger", oteltracer.WithJaegerEndpoint(""))
-		assert.Nil(t, spanExporter)
-		assert.Error(t, err)
 	})
 
 	t.Run("otlp without endpoint", func(t *testing.T) {

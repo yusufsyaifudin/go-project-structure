@@ -4,29 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"time"
-
-	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 
 	"github.com/caarlos0/env"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/mitchellh/cli"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	pingcli "github.com/yusufsyaifudin/go-project-structure/cmd/cli/ping"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 )
 
 type Config struct {
 	LogLevel        string `env:"LOG_LEVEL" envDefault:"DEBUG"`
 	OtelExporter    string `env:"OTEL_EXPORTER" envDefault:"NOOP"` // NOOP, STDOUT, JAEGER, OTLP, OTLP_GRPC
-	OtelJaegerURL   string `env:"OTEL_EXPORTER_JAEGER_ENDPOINT" envDefault:"http://localhost:14268/api/traces" validate:"required_if=OtelExporter JAEGER"`
 	OtelOtlpURL     string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4318" validate:"required_if=OtelExporter OTLP"`
 	OtelOtlpGrpcURL string `env:"OTEL_EXPORTER_OTLP_GRPC_ENDPOINT" envDefault:"localhost:4317" validate:"required_if=OtelExporter OTLP_GRPC"`
 }
@@ -47,71 +46,92 @@ func main() {
 	systemCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// ** Prepare logger using slog
+	loggerOpt := &slog.HandlerOptions{
+		AddSource:   true,
+		Level:       slog.LevelDebug,
+		ReplaceAttr: nil,
+	}
+	var loggerHandler slog.Handler = slog.NewJSONHandler(os.Stdout, loggerOpt)
+
 	// ** Prepare logger using ylog
-	logger := ylog.SetupZapLogger(cfg.LogLevel)
+	yloggerOpt := &ylog.OpenTelemetryOption{
+		ContextExtractor: func(ctx context.Context) []slog.Attr {
+			return nil
+		},
+	}
+
+	loggerHandler = ylog.NewOTEL(loggerHandler, yloggerOpt)
+	logger := slog.New(loggerHandler)
+	slog.SetDefault(logger)
+
+	otelResources := newResource(systemCtx, serviceName)
 
 	// ** Prepare tracer for CLI (act as front-end).
 	// This never block the CLI operation since it send through UDP.
 	// If not configured, it will not export anything using noop exporter.
-	var tracerExporter trace.SpanExporter
-	var tracerErr error
-	// prepare tracer exporter, whether using stdout or jaeger
-	tracerExporter, tracerErr = oteltracer.NewTracerExporter(cfg.OtelExporter,
-		oteltracer.WithLogger(ylog.WrapIOWriter(logger)),
-		oteltracer.WithJaegerEndpoint(cfg.OtelJaegerURL),
-		oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
-		oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
-	)
-	if tracerErr != nil {
-		tracerExporter = tracetest.NewNoopExporter()
+	{
+		var tracerExporter trace.SpanExporter
+		var tracerErr error
 
-		logger.Error(systemCtx, "failed configure tracer", ylog.KV("error", err))
-	} else {
-		logger.Debug(systemCtx, fmt.Sprintf("using %s exporter", cfg.OtelExporter))
-	}
+		// prepare tracer exporter, whether using stdout or jaeger
+		tracerExporter, tracerErr = oteltracer.NewTracerExporter(cfg.OtelExporter,
+			oteltracer.WithLogger(slog.Default()),
+			oteltracer.WithOTLPEndpoint(cfg.OtelOtlpURL),
+			oteltracer.WithOTLPGrpcEndpoint(cfg.OtelOtlpGrpcURL),
+		)
+		if tracerErr != nil {
+			tracerExporter = tracetest.NewNoopExporter()
 
-	tracerProvider := trace.NewTracerProvider(
-		// use sync operation to make sure every span persisted before CLI done
-		trace.WithSyncer(tracerExporter),
-		trace.WithResource(newResource(systemCtx, logger, serviceName)),
-		trace.WithSampler(trace.AlwaysSample()),
-	)
-	defer func() {
-		if _err := tracerProvider.Shutdown(context.Background()); _err != nil {
-			logger.Error(systemCtx, "shutdown tracer error", ylog.KV("error", _err))
+			slog.ErrorContext(systemCtx, "failed configure tracer", slog.Any("error", err))
+		} else {
+			slog.InfoContext(systemCtx, fmt.Sprintf("using %s exporter", cfg.OtelExporter))
 		}
-	}()
+
+		tracerProviderImplemented := trace.NewTracerProvider(
+			// use sync operation to make sure every span persisted before CLI done
+			trace.WithSyncer(tracerExporter),
+			trace.WithResource(otelResources),
+			trace.WithSampler(trace.AlwaysSample()),
+		)
+		defer func() {
+			if _err := tracerProviderImplemented.Shutdown(systemCtx); _err != nil {
+				slog.ErrorContext(systemCtx, "shutdown tracer error", slog.Any("error", _err))
+			}
+		}()
+
+		otel.SetTracerProvider(tracerProviderImplemented)
+	}
 
 	c := cli.NewCLI(assets.AppName, "1.0.0")
 	c.Args = os.Args[1:]
 	c.Commands = map[string]cli.CommandFactory{
 		"ping": func() (cli.Command, error) {
 			return pingcli.NewCMD(
-				pingcli.WithTracer(tracerProvider),
-				pingcli.WithLogger(logger),
+				pingcli.WithTracer(otel.GetTracerProvider()),
 			)
 		},
 	}
 
 	exitStatus, err := c.Run()
 	if err != nil {
-		logger.Error(systemCtx, "failed to run cli", ylog.KV("error", err))
+		slog.ErrorContext(systemCtx, "failed to run cli", slog.Any("error", err))
 	}
 
 	os.Exit(exitStatus)
 }
 
 // newResource returns a resource describing this application.
-func newResource(ctx context.Context, logger ylog.Logger, serviceName string) *resource.Resource {
+func newResource(ctx context.Context, serviceName string) *resource.Resource {
 	r := resource.NewWithAttributes(
 		semconv.SchemaURL,
-		semconv.ServiceNameKey.String(serviceName),
-		semconv.ServiceVersionKey.String("v0.1.0"),
-		attribute.String("environment", "demo"),
+		semconv.ServiceName(serviceName),
+		semconv.ServiceVersion("v0.1.0"),
+		semconv.DeploymentEnvironmentName("demo"),
 	)
 
 	if r == nil {
-		logger.Error(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
+		slog.ErrorContext(ctx, "cannot use OpenTelemetry resource because of nil, fallback to default resource")
 		return resource.Default()
 	}
 

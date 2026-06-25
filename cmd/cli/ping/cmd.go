@@ -5,18 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/jessevdk/go-flags"
 	"github.com/mitchellh/cli"
-	"go.opentelemetry.io/otel/trace"
-
-	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
-	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
-	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpclientmw"
+	"github.com/yusufsyaifudin/go-project-structure/transport/restapi/handlersystem"
 )
 
 const (
@@ -32,24 +33,15 @@ func WithTracer(tracer trace.TracerProvider) Opt {
 	}
 }
 
-func WithLogger(log ylog.Logger) Opt {
-	return func(cmd *CMD) error {
-		cmd.logger = log
-		return nil
-	}
-}
-
 type CMD struct {
 	tracer trace.TracerProvider
-	logger ylog.Logger
 }
 
 var _ cli.Command = (*CMD)(nil)
 
 func NewCMD(opts ...Opt) (*CMD, error) {
 	cmd := &CMD{
-		tracer: trace.NewNoopTracerProvider(),
-		logger: ylog.NewNoop(),
+		tracer: noop.NewTracerProvider(),
 	}
 
 	for _, opt := range opts {
@@ -99,7 +91,7 @@ func (c *CMD) Run(args []string) int {
 	)
 	transport = httpclientmw.NewHttpRoundTripper(
 		httpclientmw.WithBaseRoundTripper(transport),
-		httpclientmw.WithLogger(c.logger),
+		httpclientmw.WithLogger(slog.Default()),
 		httpclientmw.WithTracer(c.tracer),
 	)
 
@@ -108,13 +100,13 @@ func (c *CMD) Run(args []string) int {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(flag.Server, "/")+"/ping", nil)
 	if err != nil {
-		c.logger.Error(ctx, "cannot prepare request", ylog.KV("error", err))
+		slog.ErrorContext(ctx, "cannot prepare request", slog.Any("error", err))
 		return 1
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		c.logger.Error(ctx, "cannot do http client request", ylog.KV("error", err))
+		slog.ErrorContext(ctx, "cannot do http client request", slog.Any("error", err))
 		return 1
 	}
 
@@ -125,7 +117,7 @@ func (c *CMD) Run(args []string) int {
 		}
 
 		if _err != nil {
-			c.logger.Error(ctx, "cannot close response body", ylog.KV("error", _err))
+			slog.ErrorContext(ctx, "cannot close response body", slog.Any("error", _err))
 		}
 	}()
 
@@ -135,11 +127,11 @@ func (c *CMD) Run(args []string) int {
 	dec := json.NewDecoder(resp.Body)
 	err = dec.Decode(&respBody)
 	if err != nil {
-		c.logger.Error(ctx, "cannot decode response body", ylog.KV("error", err))
+		slog.ErrorContext(ctx, "cannot decode response body", slog.Any("error", err))
 		return 1
 	}
 
-	c.logger.Info(ctx, "response", ylog.KV("response", respBody))
+	slog.InfoContext(ctx, "response", slog.Any("response", respBody))
 
 	return 0
 }
