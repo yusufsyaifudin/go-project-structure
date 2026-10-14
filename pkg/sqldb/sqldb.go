@@ -55,23 +55,22 @@ type row struct{ r *sql.Row }
 func (w *row) Scan(dest ...any) error { return w.r.Scan(dest...) }
 
 type sqlTx struct {
-	t            *sql.Tx
-	ctx          context.Context
-	logger       *slog.Logger
-	contextAttrs func(context.Context) []slog.Attr
+	t      *sql.Tx
+	ctx    context.Context
+	logger *slog.Logger
 }
 
 func (w *sqlTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	started := time.Now()
 	result, err := w.t.ExecContext(ctx, query, args...)
-	log(ctx, w.logger, w.contextAttrs, "exec", started, err, slog.String("query", query))
+	log(ctx, w.logger, "exec", started, err, slog.String("query", query))
 	return result, err
 }
 
 func (w *sqlTx) QueryContext(ctx context.Context, query string, args ...any) (Rows, error) {
 	started := time.Now()
 	r, err := w.t.QueryContext(ctx, query, args...)
-	log(ctx, w.logger, w.contextAttrs, "query", started, err, slog.String("query", query))
+	log(ctx, w.logger, "query", started, err, slog.String("query", query))
 	if err != nil {
 		return nil, err
 	}
@@ -81,44 +80,43 @@ func (w *sqlTx) QueryContext(ctx context.Context, query string, args ...any) (Ro
 func (w *sqlTx) QueryRowContext(ctx context.Context, query string, args ...any) Row {
 	started := time.Now()
 	result := &row{r: w.t.QueryRowContext(ctx, query, args...)}
-	log(ctx, w.logger, w.contextAttrs, "query_row", started, nil, slog.String("query", query))
+	log(ctx, w.logger, "query_row", started, nil, slog.String("query", query))
 	return result
 }
 
 func (w *sqlTx) Commit() error {
 	started := time.Now()
 	err := w.t.Commit()
-	log(w.ctx, w.logger, w.contextAttrs, "commit", started, err)
+	log(w.ctx, w.logger, "commit", started, err)
 	return err
 }
 
 func (w *sqlTx) Rollback() error {
 	started := time.Now()
 	err := w.t.Rollback()
-	log(w.ctx, w.logger, w.contextAttrs, "rollback", started, err)
+	log(w.ctx, w.logger, "rollback", started, err)
 	return err
 }
 
 // Adapter wraps *sql.DB to satisfy DB.
 type Adapter struct {
-	d            *sql.DB
-	logger       *slog.Logger
-	contextAttrs func(context.Context) []slog.Attr
+	d      *sql.DB
+	logger *slog.Logger
 }
 
 // Opt configures an Adapter.
 type Opt func(*Adapter)
 
-// WithSlog enables database operation logging when logger is non-nil. The
-// optional contextAttrs function can add request or tracing attributes from the
-// operation context to each log record.
-func WithSlog(logger *slog.Logger, contextAttrs ...func(context.Context) []slog.Attr) Opt {
+// WithSlog enables database operation logging when logger is non-nil, adding
+// the provided attributes to every log record.
+func WithSlog(logger *slog.Logger, attrs ...slog.Attr) Opt {
 	return func(adapter *Adapter) {
 		if logger != nil {
-			adapter.logger = logger
-			if len(contextAttrs) > 0 {
-				adapter.contextAttrs = contextAttrs[0]
+			loggerAttrs := make([]any, len(attrs))
+			for i, attr := range attrs {
+				loggerAttrs[i] = attr
 			}
+			adapter.logger = logger.With(loggerAttrs...)
 		}
 	}
 }
@@ -138,14 +136,14 @@ func New(d *sql.DB, opts ...Opt) *Adapter {
 func (w *Adapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	started := time.Now()
 	result, err := w.d.ExecContext(ctx, query, args...)
-	log(ctx, w.logger, w.contextAttrs, "exec", started, err, slog.String("query", query))
+	log(ctx, w.logger, "exec", started, err, slog.String("query", query))
 	return result, err
 }
 
 func (w *Adapter) QueryContext(ctx context.Context, query string, args ...any) (Rows, error) {
 	started := time.Now()
 	r, err := w.d.QueryContext(ctx, query, args...)
-	log(ctx, w.logger, w.contextAttrs, "query", started, err, slog.String("query", query))
+	log(ctx, w.logger, "query", started, err, slog.String("query", query))
 	if err != nil {
 		return nil, err
 	}
@@ -155,21 +153,21 @@ func (w *Adapter) QueryContext(ctx context.Context, query string, args ...any) (
 func (w *Adapter) QueryRowContext(ctx context.Context, query string, args ...any) Row {
 	started := time.Now()
 	result := &row{r: w.d.QueryRowContext(ctx, query, args...)}
-	log(ctx, w.logger, w.contextAttrs, "query_row", started, nil, slog.String("query", query))
+	log(ctx, w.logger, "query_row", started, nil, slog.String("query", query))
 	return result
 }
 
 func (w *Adapter) BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error) {
 	started := time.Now()
 	t, err := w.d.BeginTx(ctx, opts)
-	log(ctx, w.logger, w.contextAttrs, "begin_tx", started, err)
+	log(ctx, w.logger, "begin_tx", started, err)
 	if err != nil {
 		return nil, err
 	}
-	return &sqlTx{t: t, ctx: ctx, logger: w.logger, contextAttrs: w.contextAttrs}, nil
+	return &sqlTx{t: t, ctx: ctx, logger: w.logger}, nil
 }
 
-func log(ctx context.Context, logger *slog.Logger, contextAttrs func(context.Context) []slog.Attr, operation string, started time.Time, err error, attrs ...slog.Attr) {
+func log(ctx context.Context, logger *slog.Logger, operation string, started time.Time, err error, attrs ...slog.Attr) {
 	if logger == nil {
 		return
 	}
@@ -179,11 +177,6 @@ func log(ctx context.Context, logger *slog.Logger, contextAttrs func(context.Con
 	}
 	for _, attr := range attrs {
 		logAttrs = append(logAttrs, attr)
-	}
-	if contextAttrs != nil {
-		for _, attr := range contextAttrs(ctx) {
-			logAttrs = append(logAttrs, attr)
-		}
 	}
 	if err != nil {
 		logAttrs = append(logAttrs, slog.Any("error", err))

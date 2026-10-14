@@ -201,7 +201,11 @@ func (s *Server) Run(_ []string) int {
 		return exitCodeError
 	}
 	// Wrap the connection with the shared SQL interface and operation logger for services/repositories.
-	s.DB = sqldb.New(db, sqldb.WithSlog(slog.Default()))
+	s.DB = sqldb.New(db, sqldb.WithSlog(
+		slog.Default(),
+		slog.String("service", serviceName),
+		slog.String("component", "postgres"),
+	))
 
 	startupTime := time.Now()
 

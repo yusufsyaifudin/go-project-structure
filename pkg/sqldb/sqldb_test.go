@@ -314,21 +314,14 @@ func TestTx_QueryRowContext(t *testing.T) {
 func TestTx_Commit(t *testing.T) {
 	db := newTestDB(t, "tx-commit", &behavior{})
 	w := sqldb.New(db)
-	type contextKey string
-	ctx := context.WithValue(context.Background(), contextKey("request_id"), "req-123")
 	var output bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	w = sqldb.New(db, sqldb.WithSlog(logger, func(ctx context.Context) []slog.Attr {
-		requestID, _ := ctx.Value(contextKey("request_id")).(string)
-		if requestID == "" {
-			return nil
-		}
-		return []slog.Attr{slog.String("request_id", requestID)}
-	}))
-	txObj, err := w.BeginTx(ctx, nil)
+	w = sqldb.New(db, sqldb.WithSlog(logger, slog.String("request_id", "req-123"), slog.String("component", "test")))
+	txObj, err := w.BeginTx(context.Background(), nil)
 	require.NoError(t, err)
 	assert.NoError(t, txObj.Commit())
 	assert.Contains(t, output.String(), "request_id=req-123")
+	assert.Contains(t, output.String(), "component=test")
 }
 
 func TestTx_Rollback(t *testing.T) {
