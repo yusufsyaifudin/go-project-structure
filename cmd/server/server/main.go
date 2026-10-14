@@ -201,7 +201,7 @@ func (s *Server) Run(_ []string) int {
 		return exitCodeError
 	}
 	// Wrap the connection with the shared SQL interface and operation logger for services/repositories.
-	s.DB = sqldb.New(db, slog.Default())
+	s.DB = sqldb.New(db, sqldb.WithSlog(slog.Default()))
 
 	startupTime := time.Now()
 

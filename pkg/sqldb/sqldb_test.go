@@ -154,13 +154,20 @@ func TestAdapter_OptionalLogger(t *testing.T) {
 	db := newTestDB(t, "adapter-logger", &behavior{})
 	var output bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	w := sqldb.New(db, logger)
+	w := sqldb.New(db, sqldb.WithSlog(logger))
 
 	_, err := w.ExecContext(context.Background(), "INSERT INTO t VALUES ($1)", "sensitive-value")
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "database operation completed")
 	assert.Contains(t, output.String(), "INSERT INTO t VALUES ($1)")
 	assert.NotContains(t, output.String(), "sensitive-value")
+}
+
+func TestWithSlog_NilDisablesLogging(t *testing.T) {
+	db := newTestDB(t, "adapter-nil-logger", &behavior{})
+	w := sqldb.New(db, sqldb.WithSlog(nil))
+	_, err := w.ExecContext(context.Background(), "INSERT INTO t VALUES ($1)", "value")
+	require.NoError(t, err)
 }
 
 // ─── Adapter.ExecContext ──────────────────────────────────────────────────────

@@ -103,14 +103,28 @@ type Adapter struct {
 	logger *slog.Logger
 }
 
-// New wraps a *sql.DB so it satisfies DB. Passing a logger enables operation
-// logging; without one, the adapter emits no logs.
-func New(d *sql.DB, logger ...*slog.Logger) *Adapter {
-	var operationLogger *slog.Logger
-	if len(logger) > 0 {
-		operationLogger = logger[0]
+// Opt configures an Adapter.
+type Opt func(*Adapter)
+
+// WithSlog enables database operation logging when logger is non-nil.
+func WithSlog(logger *slog.Logger) Opt {
+	return func(adapter *Adapter) {
+		if logger != nil {
+			adapter.logger = logger
+		}
 	}
-	return &Adapter{d: d, logger: operationLogger}
+}
+
+// New wraps a *sql.DB so it satisfies DB. Logging is disabled unless enabled
+// with WithSlog.
+func New(d *sql.DB, opts ...Opt) *Adapter {
+	adapter := &Adapter{d: d}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(adapter)
+		}
+	}
+	return adapter
 }
 
 func (w *Adapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
