@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.26-alpine3.24 AS build-env
+FROM golang:1.27.2-alpine3.24 AS build-env
 RUN apk --no-cache add git gcc bash
 
 # copy the file instead of add we use copy so caching layer could do it better

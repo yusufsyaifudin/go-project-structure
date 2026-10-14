@@ -3,7 +3,7 @@
 ## Module
 
 `github.com/yusufsyaifudin/go-project-structure`
-Go version: **1.26** (see `go.mod`).
+Go version: **1.27.2** (see `go.mod`).
 
 This repository is a **base project template**: a working Go HTTP service
 skeleton (HTTP server, Postgres wiring, migrations, tracing, metrics) with
