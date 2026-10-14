@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	httpSwagger "github.com/swaggo/http-swagger"
 
 	"github.com/yusufsyaifudin/go-project-structure/pkg/respbuilder"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
@@ -16,7 +18,7 @@ import (
 
 type HTTPConfig func(*HTTP) error
 
-// WithBuildCommitID add build commit id info
+// WithBuildCommitID add build commit id info.
 func WithBuildCommitID(hash string) HTTPConfig {
 	return func(h *HTTP) error {
 		h.buildCommitID = hash
@@ -24,7 +26,7 @@ func WithBuildCommitID(hash string) HTTPConfig {
 	}
 }
 
-// WithBuildTime add build time info
+// WithBuildTime add build time info.
 func WithBuildTime(t time.Time) HTTPConfig {
 	return func(h *HTTP) error {
 		h.buildTime = t
@@ -32,10 +34,19 @@ func WithBuildTime(t time.Time) HTTPConfig {
 	}
 }
 
-// WithStartupTime add startup time info
+// WithStartupTime add startup time info.
 func WithStartupTime(t time.Time) HTTPConfig {
 	return func(h *HTTP) error {
 		h.startupTime = t
+		return nil
+	}
+}
+
+// WithBaseURL sets the public base URL of the service (must end with /).
+// It is used to build the swagger spec URL served by the swagger UI.
+func WithBaseURL(url string) HTTPConfig {
+	return func(h *HTTP) error {
+		h.baseURL = strings.TrimRight(url, "/") + "/"
 		return nil
 	}
 }
@@ -64,6 +75,7 @@ type HTTP struct {
 	buildCommitID string    `validate:"-"`
 	buildTime     time.Time `validate:"-"`
 	startupTime   time.Time `validate:"required"`
+	baseURL       string    `validate:"-"`
 	handlers      []EchoRouter
 
 	echo *echo.Echo
@@ -106,6 +118,12 @@ func NewHTTP(configs ...HTTPConfig) (*HTTP, error) {
 	for _, handler := range h.handlers {
 		handler.Router(e)
 	}
+
+	// Swagger UI — served at /swagger/index.html; spec at /swagger/doc.json.
+	specURL := fmt.Sprintf("%sswagger/doc.json", h.baseURL)
+	e.GET("/swagger/*", echo.WrapHandler(httpSwagger.Handler(
+		httpSwagger.URL(specURL),
+	)))
 
 	return h, nil
 }

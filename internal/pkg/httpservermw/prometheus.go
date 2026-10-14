@@ -15,7 +15,7 @@ import (
 
 type PrometheusOpt func(*Prometheus) error
 
-// PrometheusWithMetric set metrics.Metric
+// PrometheusWithMetric set metrics.Metric.
 func PrometheusWithMetric(m metrics.Metric) PrometheusOpt {
 	return func(p *Prometheus) error {
 		p.metric = m

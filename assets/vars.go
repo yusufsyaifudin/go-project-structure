@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	AppName = "myapp"
+	AppName = "go_project_structure"
 )
 
 var (

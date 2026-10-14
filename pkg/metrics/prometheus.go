@@ -13,7 +13,7 @@ import (
 
 type PrometheusOpt func(*Prometheus) error
 
-// PrometheusWithPrefix set prefix for each metric
+// PrometheusWithPrefix set prefix for each metric.
 func PrometheusWithPrefix(prefix string) PrometheusOpt {
 	return func(p *Prometheus) error {
 		p.prefix = prefix
@@ -170,7 +170,7 @@ func (p *Prometheus) HandlerFunc() http.HandlerFunc {
 	}
 }
 
-// Close TODO implement close
+// Close TODO implement close.
 func (p *Prometheus) Close() error {
 	return nil
 }

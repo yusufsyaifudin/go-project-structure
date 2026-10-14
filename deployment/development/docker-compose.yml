@@ -1,30 +1,85 @@
 # Use root/password as user/password credentials
-version: '3.8'
-
 services:
+  # ─── Application ──────────────────────────────────────────────────────────
+  migrate:
+    image: ghcr.io/yusufsyaifudin/go-project-structure:latest
+    container_name: migrate
+    restart: "no"
+    command: ["/app/server.bin", "sql-migrate", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DSN: "postgres://wallet:wallet_secret@postgres:5432/wallet_db?sslmode=disable"
+
+  go-project-structure:
+    image: ghcr.io/yusufsyaifudin/go-project-structure:latest
+    container_name: go-project-structure
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      BASE_URL: "http://localhost:3001/" # Must refer to exposed ports
+      LOG_LEVEL: DEBUG
+      APP_ENV: "docker"
+      POSTGRES_DSN: "postgres://wallet:wallet_secret@postgres:5432/wallet_db?sslmode=disable"
+      OTEL_EXPORTER: OTLP_GRPC
+      OTEL_EXPORTER_OTLP_GRPC_ENDPOINT: "otel-collector:4317"
+    ports:
+      - "3001:3000"
+
+  # ─── Infrastructure ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wallet_db
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker-data/postgres:/var/lib/postgresql
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d wallet_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Observability ────────────────────────────────────────────────────────
   jaeger:
-    image: jaegertracing/all-in-one:1
+    image: jaegertracing/jaeger:2.19.0
     container_name: jaeger
     restart: always
-    command:
-      - '--collector.otlp.enabled=true'
+    environment:
+      - LOG_LEVEL=debug
     ports:
-      - "5775:5775/udp"
-      - "6831:6831/udp"
-      - "6832:6832/udp"
-      - "5778:5778"
-      - "16686:16686" # dashboard
-      - "14268:14268" # Accepts spans directly from clients in jaeger.thrift format with binary thrift protocol (POST to /api/traces). Also serves sampling policies at /api/sampling, similar to Agent’s port 5778.
-      - "9411:9411" # Accepts Zipkin spans in Thrift, JSON and Proto (disabled by default).
-      - "14269:14269" # Admin port: health check at / and metrics at /metrics.
-      - "14317:4317" # gRPC Accepts traces in OpenTelemetry OTLP format if --collector.otlp.enabled=true.
-      - "14318:4318" # HTTP Accepts traces in OpenTelemetry OTLP format if --collector.otlp.enabled=true.
-      - "14250:14250" # Used by jaeger-agent to send spans in model.proto format.
+      - "5778:5778"   # CollectorV2GRPC is the HTTP port for remote sampling extension
+      - "5779:5779"   # CollectorV2GRPC is the gRPC port for remote sampling extension
+      - "16685:16685" # QueryGRPC is the default port of GRPC requests for Query trace retrieval
+      - "16686:16686" # QueryHTTP is the default port for UI and Query API (e.g. /api/* endpoints)
+      - "16687:16687" # MCPHTTP is the default port for MCP (Model Context Protocol) server HTTP endpoint
+      - "17271:17271" # RemoteStorageGRPC is the default port of GRPC requests for Remote Storage
+      - "17270:17270" # RemoteStorageHTTP is the default admin HTTP port (health check, metrics, etc.)
+      - "14317:4317"  # https://github.com/jaegertracing/jaeger/blob/v2.19.0/cmd/jaeger/internal/integration/e2e_integration.go#L27
+      - "14318:4318"
+      - "18888:8888"   # https://github.com/jaegertracing/jaeger/blob/v2.19.0/cmd/jaeger/internal/integration/e2e_integration.go#L129-L132
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "-qO", "/dev/null", "http://localhost:16686/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   # Collector
   otel-collector:
-    image: otel/opentelemetry-collector:0.69.0
+    image: otel/opentelemetry-collector:0.155.0
     container_name: otel-collector
+    restart: always
     command: [ "--config=/etc/otel-collector-config.yaml" ]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
@@ -38,10 +93,11 @@ services:
       - "4318:4318"   # OTLP http receiver
       - "55679:55679" # zpages extension
     depends_on:
-      - jaeger
+      jaeger:
+        condition: service_healthy
 
   node-exporter:
-    image: prom/node-exporter:v0.18.1
+    image: prom/node-exporter:v1
     container_name: node-exporter
     restart: unless-stopped
     volumes:
@@ -56,7 +112,7 @@ services:
       - 9100
 
   prometheus:
-    image: prom/prometheus:v2.41.0
+    image: prom/prometheus:v3.5.4
     container_name: prometheus
     restart: unless-stopped
     volumes:
@@ -74,19 +130,22 @@ services:
       - 9090
 
   prom-push-gateway:
-    image: prom/pushgateway:v1.5.1
+    image: prom/pushgateway:v1.11.3
     container_name: prom-push-gateway
     restart: unless-stopped
     ports:
       - "9091:9091"
 
   grafana:
-    image: grafana/grafana-oss:9.3.6
+    image: grafana/grafana-oss:13.0.2-ubuntu
     container_name: grafana
     # ports will be accessible internally and published on the host machine.
     ports:
       - "3000:3000"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     command:
       - '--config=/etc/grafana/grafana.ini'
     environment:
@@ -103,5 +162,7 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: secret
     volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./docker-data/grafana:/var/lib/grafana

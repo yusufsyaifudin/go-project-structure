@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
@@ -49,6 +50,24 @@ func TestLogMwWithFilter(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
 		opt := httpservermw.LogMwWithFilter(nil)
 		err := opt(logMwTest)
+		assert.NoError(t, err)
+	})
+}
+
+func TestLogMwWithTracerSpanStartOption(t *testing.T) {
+	t.Run("no options", func(t *testing.T) {
+		lm := &httpservermw.LogMiddleware{}
+		opt := httpservermw.LogMwWithTracerSpanStartOption()
+		err := opt(lm)
+		assert.NoError(t, err)
+	})
+
+	t.Run("with span kind option", func(t *testing.T) {
+		lm := &httpservermw.LogMiddleware{}
+		opt := httpservermw.LogMwWithTracerSpanStartOption(
+			trace.WithSpanKind(trace.SpanKindServer),
+		)
+		err := opt(lm)
 		assert.NoError(t, err)
 	})
 }

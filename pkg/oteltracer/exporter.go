@@ -31,7 +31,7 @@ func WithLogger(logger *slog.Logger) ExporterOpt {
 }
 
 // WithOTLPEndpoint set OpenTelemetry endpoint collector for type OTLP span exporter.
-// Default to localhost:4318
+// Default to localhost:4318.
 func WithOTLPEndpoint(endpoint string) ExporterOpt {
 	return func(option *ExporterOption) error {
 		option.otlpEndpoint = endpoint
@@ -40,7 +40,7 @@ func WithOTLPEndpoint(endpoint string) ExporterOpt {
 }
 
 // WithOTLPGrpcEndpoint set OpenTelemetry endpoint collector for type OTLP_GRPC span exporter using gRPC.
-// Default to localhost:4317
+// Default to localhost:4317.
 func WithOTLPGrpcEndpoint(endpoint string) ExporterOpt {
 	return func(option *ExporterOption) error {
 		option.otlpGrpcEndpoint = endpoint

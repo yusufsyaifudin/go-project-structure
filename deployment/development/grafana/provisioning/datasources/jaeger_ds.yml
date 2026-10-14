@@ -1,0 +1,24 @@
+# config file version
+apiVersion: 1
+
+datasources:
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger-ds
+    url: http://jaeger:16686
+    access: proxy
+    isDefault: false
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: '-2m'
+        spanEndTimeShift: '2m'
+        tags:
+          - key: 'service.name'
+            value: 'service'
+      nodeGraph:
+        enabled: true
+      traceIdTimeParams:
+        enabled: true
+      spanBar:
+        type: 'Duration'

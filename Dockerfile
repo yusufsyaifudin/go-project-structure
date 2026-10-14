@@ -1,5 +1,5 @@
 # build stage
-FROM golang:alpine AS build-env
+FROM golang:1.26-alpine3.24 AS build-env
 RUN apk --no-cache add git gcc bash
 
 # copy the file instead of add we use copy so caching layer could do it better
@@ -9,6 +9,10 @@ COPY go.mod /src
 COPY go.sum /src
 RUN go mod download
 
+# Install swag for swagger docs generation (pinned to a specific version for reproducibility).
+# CGO_ENABLED=0: swag is pure Go — no C headers needed, and Alpine lacks musl-dev by default.
+RUN CGO_ENABLED=0 go install github.com/swaggo/swag/cmd/swag@v1.16.6
+
 COPY . /src
 
 RUN cat /dev/null > "/src/assets/build_commit_hash.txt"
@@ -17,12 +21,21 @@ RUN git rev-list -1 HEAD >> "/src/assets/build_commit_hash.txt"
 RUN cat /dev/null > "/src/assets/build_time.txt"
 RUN BUILD_TIME=$(date +"%s") && echo "$BUILD_TIME" >> "/src/assets/build_time.txt"
 
+# Generate OpenAPI docs from swaggo annotations.
+RUN swag init \
+      --parseDependency \
+      --parseInternal \
+      -g transport/restapi/doc.go \
+      -o docs/swagger
+
 # server
 RUN env CGO_ENABLED=0 go build -o server.bin /src/cmd/server/main.go
 
 # final stage build using pure alpine image
-FROM alpine:3.16
-LABEL maintainer="Yusuf"
+FROM alpine:3.24
+LABEL maintainer="Yusuf Syaifudin <yusuf.syaifudin@gmail.com>"
+LABEL org.opencontainers.image.authors="Yusuf Syaifudin <yusuf.syaifudin@gmail.com>"
+
 
 RUN apk update
 RUN apk --no-cache add curl bash which wget openssh
@@ -30,6 +43,5 @@ RUN apk --no-cache add curl bash which wget openssh
 # copy golang binary
 WORKDIR /app
 COPY --from=build-env /src/server.bin /app/server.bin
-
 
 CMD [ "/app/server.bin" ]

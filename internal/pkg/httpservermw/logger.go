@@ -29,7 +29,7 @@ type LoggerOpt func(*LogMiddleware) error
 // Otherwise, if return true, it will be included in log.
 type Filter func(*http.Request) bool
 
-// LogMwWithLogger set logger
+// LogMwWithLogger set logger.
 func LogMwWithLogger(logger *slog.Logger) LoggerOpt {
 	return func(tripper *LogMiddleware) error {
 		if logger == nil {
@@ -75,7 +75,7 @@ func LogMwWithTracerSpanStartOption(opts ...trace.SpanStartOption) LoggerOpt {
 	}
 }
 
-// LogMwWithFilter filter out what route that don't want to be logged
+// LogMwWithFilter filter out what route that don't want to be logged.
 func LogMwWithFilter(f Filter) LoggerOpt {
 	return func(tripper *LogMiddleware) error {
 		tripper.filter = f
@@ -90,7 +90,7 @@ type LogMiddleware struct {
 	filter           Filter
 }
 
-// LoggingMiddleware is a middleware that logs incoming requests
+// LoggingMiddleware is a middleware that logs incoming requests.
 func LoggingMiddleware(next http.Handler, opts ...LoggerOpt) http.Handler {
 	l := &LogMiddleware{
 		logger:           slog.Default(),

@@ -53,3 +53,14 @@ server-darwin
 .env
 docker-data/
 coverage.cov
+
+# Generated swagger docs (regenerate with: make swagger)
+docs/swagger/docs.go
+docs/swagger/swagger.yaml
+docs/swagger/swagger.json
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
+
+# k6 load-test HTML reports (generated at runtime)
+scripts/load-test/result/*.html

@@ -4,7 +4,7 @@ on:
   # run it on push to the default repository branch
   push:
     branches:
-      - master
+      - main
 
 jobs:
   test:
@@ -31,7 +31,12 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test -v -race -coverprofile coverage.cov -cover ./...
+        run: |
+          go test -v -race \
+            -coverprofile coverage.cov \
+            -coverpkg=./internal/gateway/...,./internal/pkg/...,./internal/service/...,./pkg/...,./transport/... \
+            ./...
+          go tool cover -func coverage.cov
 
   lint:
     name: Lint
@@ -107,11 +112,9 @@ jobs:
       - name: Where is golang
         run: whereis go
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Login to Github Packages
         uses: docker/login-action@v2
@@ -120,15 +123,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image and push to Docker Hub and GitHub Container Registry
+      - name: Build image and push to GitHub Container Registry
         uses: docker/build-push-action@v3
         with:
-          # relative path to the place where source code with Dockerfile is located
           context: .
-          # Note: tags has to be all lower-case
           tags: |
-            yusufs/go-project-structure:latest
             ghcr.io/yusufsyaifudin/go-project-structure:latest
+            ghcr.io/yusufsyaifudin/go-project-structure:${{ steps.sha.outputs.short }}
           platforms: linux/amd64,linux/arm64
           push: true
 

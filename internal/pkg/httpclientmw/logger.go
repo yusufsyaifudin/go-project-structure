@@ -86,7 +86,7 @@ func WithTracer(t trace.TracerProvider) Opt {
 	}
 }
 
-// roundTripper hold an implementation of http.RoundTripper
+// roundTripper hold an implementation of http.RoundTripper.
 type roundTripper struct {
 	base           http.RoundTripper
 	msg            string

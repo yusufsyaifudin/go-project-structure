@@ -12,12 +12,20 @@ type RespCodeErr int
 const (
 	ErrUnknown RespCodeErr = iota
 	ErrGeneral
+	ErrInsufficientBalance
+	ErrConcurrentRequest
+	ErrIdempotencyKeyMismatch
+	ErrValidation
 )
 
-// respMapErr must use prefix E to indicate the error
+// respMapErr must use prefix E to indicate the error.
 var respMapErr = map[RespCodeErr]RespStructureErr{
-	ErrUnknown: {Code: "E", Status: "ErrUnknown"},
-	ErrGeneral: {Code: "E0", Status: "ErrorGeneral"},
+	ErrUnknown:                {Code: "E", Status: "ErrUnknown"},
+	ErrGeneral:                {Code: "E0", Status: "ErrorGeneral"},
+	ErrInsufficientBalance:    {Code: "E1", Status: "ErrInsufficientBalance"},
+	ErrConcurrentRequest:      {Code: "E2", Status: "ErrConcurrentRequest"},
+	ErrIdempotencyKeyMismatch: {Code: "E3", Status: "ErrIdempotencyKeyMismatch"},
+	ErrValidation:             {Code: "E4", Status: "ErrValidation"},
 }
 
 // RespCodeErrStatus get RespStructureErr based on response code.
@@ -31,7 +39,7 @@ func RespCodeErrStatus(code RespCodeErr) RespStructureErr {
 	return r
 }
 
-// GetAllRespCodeErr return all available response code for error
+// GetAllRespCodeErr return all available response code for error.
 func GetAllRespCodeErr() []RespCodeErr {
 	codes := make([]RespCodeErr, 0)
 	for code := range respMapErr {
@@ -46,7 +54,7 @@ type RespError struct {
 	Reasons []string `json:"reasons,omitempty"`
 }
 
-// RespStructureErr to ensure that json marshalled version will not sort the keys
+// RespStructureErr to ensure that json marshalled version will not sort the keys.
 type RespStructureErr struct {
 	Code   string     `json:"code"`
 	Status string     `json:"status"`

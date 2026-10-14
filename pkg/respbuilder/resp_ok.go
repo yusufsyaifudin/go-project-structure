@@ -35,7 +35,7 @@ func GetAllRespCodeOk() []RespCodeOk {
 	return codes
 }
 
-// RespStructureOk to ensure that json marshalled version will not sort the keys
+// RespStructureOk to ensure that json marshalled version will not sort the keys.
 type RespStructureOk struct {
 	Code    string      `json:"code"`
 	Status  string      `json:"status"`

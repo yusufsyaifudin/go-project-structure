@@ -2,8 +2,9 @@ package ylog
 
 import (
 	"context"
-	"go.opentelemetry.io/otel/trace"
 	"log/slog"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type OpenTelemetryOption struct {
@@ -47,7 +48,7 @@ func (z *OpenTelemetry) Handle(ctx context.Context, record slog.Record) error {
 			case "trace_id", "span_id":
 				continue
 			}
-			
+
 			record.AddAttrs(ctxAttr)
 		}
 	}
@@ -68,7 +69,7 @@ func (z *OpenTelemetry) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 // WithGroup is called when user call slog.WithGroup(name).
-// This open a new namespae on OpenTelemetry
+// This open a new namespae on OpenTelemetry.
 func (z *OpenTelemetry) WithGroup(name string) slog.Handler {
 	// https://cs.opensource.google/go/x/exp/+/46b07846:slog/handler.go;l=247
 	if name == "" {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 )
 

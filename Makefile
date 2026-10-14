@@ -22,6 +22,27 @@ build-docker:
 	docker build -t myapp .
 
 test:
-	go test -v -race -count=1 -coverprofile coverage.cov -cover ./...
+	go test -v -race -count=1 \
+		-coverprofile coverage.cov \
+		-coverpkg=./internal/gateway/...,./internal/pkg/...,./internal/service/...,./pkg/...,./transport/... \
+		./...
 	go tool cover -func coverage.cov
 	rm coverage.cov
+
+lint:
+	golangci-lint run --print-resources-usage --verbose --timeout=30m ./...
+
+# Generate swagger docs from swaggo annotations.
+# Must be run before building when annotations change.
+swagger:
+	swag init --parseDependency --parseInternal -g transport/restapi/doc.go -o docs/swagger
+	@# Fix swag-generated comment that godot flags (missing period).
+	@sed -i'' -e 's|// SwaggerInfo holds exported Swagger Info so clients can modify it$$|// SwaggerInfo holds exported Swagger Info so clients can modify it.|' docs/swagger/docs.go
+
+# Create a new SQL migration file.
+# Usage: make migration-new name=create_something
+migration-new:
+	@if [ -z "$(name)" ]; then echo "Usage: make migration-new name=<description>"; exit 1; fi
+	@FILENAME="migrations/$$(date +'%Y-%m-%d-%H-%M-%S')_$(name).sql"; \
+	printf '-- +migrate Up\n-- SQL in section '\''Up'\'' is executed when this migration is applied\n\n\n-- +migrate Down\n-- SQL in section '\''Down'\'' is executed when this migration is rolled back\n' > "$$FILENAME"; \
+	echo "Created $$FILENAME"

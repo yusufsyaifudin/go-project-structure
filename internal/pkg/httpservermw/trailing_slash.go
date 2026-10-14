@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// RemoveTrailingSlash is a middleware that remove trailing slashed
+// RemoveTrailingSlash is a middleware that removes trailing slashes.
 func RemoveTrailingSlash(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		if req != nil && req.URL != nil {
