@@ -6,7 +6,7 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/migrations"
 
-	"github.com/mitchellh/cli"
+	"github.com/hashicorp/cli"
 	migrate "github.com/rubenv/sql-migrate"
 )
 

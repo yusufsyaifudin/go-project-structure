@@ -9,7 +9,7 @@ import (
 
 	"github.com/yusufsyaifudin/go-project-structure/cmd/server/sqlmigrate"
 
-	"github.com/mitchellh/cli"
+	"github.com/hashicorp/cli"
 
 	"github.com/yusufsyaifudin/go-project-structure/cmd/server/server"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"

@@ -2,7 +2,7 @@
 services:
   # ─── Application ──────────────────────────────────────────────────────────
   migrate:
-    image: ghcr.io/yusufsyaifudin/go-project-structure:latest
+    image: ghcr.io/yusufsyaifudin/go-project-structure:latest-server
     container_name: migrate
     restart: "no"
     command: ["/app/server.bin", "sql-migrate", "up"]
@@ -13,7 +13,7 @@ services:
       POSTGRES_DSN: "postgres://wallet:wallet_secret@postgres:5432/wallet_db?sslmode=disable"
 
   go-project-structure:
-    image: ghcr.io/yusufsyaifudin/go-project-structure:latest
+    image: ghcr.io/yusufsyaifudin/go-project-structure:latest-server
     container_name: go-project-structure
     restart: unless-stopped
     depends_on:

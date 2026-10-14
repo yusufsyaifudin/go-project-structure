@@ -4,7 +4,7 @@ on:
   # run it on push to the default repository branch
   push:
     branches:
-      - main
+      - master
 
 jobs:
   test:
@@ -67,9 +67,9 @@ jobs:
           version: v2.12.2
           args: --print-resources-usage --verbose --timeout=30m ./...
 
-  # define job to build and publish docker image
-  build-and-push-docker-image:
-    name: Build Docker image and push to repositories
+  # Build and publish server and CLI images.
+  build-and-push-docker-images:
+    name: Build Docker images and push to GitHub Container Registry
     # run only when test and lint pass
     needs: [test, lint]
     runs-on: ubuntu-latest
@@ -123,15 +123,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image and push to GitHub Container Registry
+      - name: Build and push server image
         uses: docker/build-push-action@v3
         with:
           context: .
+          target: server
           tags: |
-            ghcr.io/yusufsyaifudin/go-project-structure:latest
-            ghcr.io/yusufsyaifudin/go-project-structure:${{ steps.sha.outputs.short }}
+            ghcr.io/yusufsyaifudin/go-project-structure:latest-server
+            ghcr.io/yusufsyaifudin/go-project-structure:${{ steps.sha.outputs.short }}-server
           platforms: linux/amd64,linux/arm64
           push: true
 
-      - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+      - name: Build and push CLI image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          target: cli
+          tags: |
+            ghcr.io/yusufsyaifudin/go-project-structure:latest-cli
+            ghcr.io/yusufsyaifudin/go-project-structure:${{ steps.sha.outputs.short }}-cli
+          platforms: linux/amd64,linux/arm64
+          push: true

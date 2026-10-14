@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/jessevdk/go-flags"
-	"github.com/mitchellh/cli"
+	"github.com/hashicorp/cli"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"

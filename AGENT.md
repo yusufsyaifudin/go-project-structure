@@ -18,7 +18,7 @@ handler groups.
 ```
 cmd/
   server/             – binary entry points and CLI sub-commands
-    main.go           – wires mitchellh/cli commands
+    main.go           – wires hashicorp/cli commands
     server/main.go    – HTTP server command (Config, Run)
     sqlmigrate/       – sql-migrate wrapper commands (up, status)
   cli/                – standalone CLI binary (sample "ping" sub-command)
@@ -167,4 +167,4 @@ Configuration: `.golangci.yml`.  CI uses `golangci-lint v2.12.2` (`golangci/gola
 | Validation | `github.com/go-playground/validator/v10` |
 | Tracing | `go.opentelemetry.io/otel` |
 | Metrics | `github.com/prometheus/client_golang` |
-| CLI | `github.com/mitchellh/cli` |
+| CLI | `github.com/hashicorp/cli` |

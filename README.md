@@ -14,7 +14,7 @@ Key properties of the template:
   migrations, embedded via `go:embed`.
 - **Built-in observability**: structured JSON logs, Prometheus metrics, and
   OpenTelemetry tracing (Jaeger / OTLP) included out of the box.
-- **CLI structure**: `mitchellh/cli` sub-commands (`server`, `sql-migrate`).
+- **CLI structure**: `hashicorp/cli` sub-commands (`server`, `sql-migrate`).
 
 ## Quick start (Docker Compose)
 

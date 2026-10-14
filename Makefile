@@ -18,8 +18,16 @@ build-server:
 	cat /dev/null > "assets/build_time.txt"
 	printf "0" > "assets/build_time.txt"
 
-build-docker:
-	docker build -t myapp .
+IMAGE_NAME?=ghcr.io/yusufsyaifudin/go-project-structure
+IMAGE_TAG?=local
+
+build-docker: build-server-image build-cli-image
+
+build-server-image:
+	docker build --target server -t $(IMAGE_NAME):$(IMAGE_TAG)-server .
+
+build-cli-image:
+	docker build --target cli -t $(IMAGE_NAME):$(IMAGE_TAG)-cli .
 
 test:
 	go test -v -race -count=1 \
