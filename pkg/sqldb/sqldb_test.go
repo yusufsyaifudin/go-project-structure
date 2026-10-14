@@ -1,11 +1,13 @@
 package sqldb_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"testing"
 
@@ -146,6 +148,19 @@ func TestNew(t *testing.T) {
 	db := newTestDB(t, "new", &behavior{})
 	w := sqldb.New(db)
 	assert.NotNil(t, w)
+}
+
+func TestAdapter_OptionalLogger(t *testing.T) {
+	db := newTestDB(t, "adapter-logger", &behavior{})
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	w := sqldb.New(db, logger)
+
+	_, err := w.ExecContext(context.Background(), "INSERT INTO t VALUES ($1)", "sensitive-value")
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "database operation completed")
+	assert.Contains(t, output.String(), "INSERT INTO t VALUES ($1)")
+	assert.NotContains(t, output.String(), "sensitive-value")
 }
 
 // ─── Adapter.ExecContext ──────────────────────────────────────────────────────

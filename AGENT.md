@@ -34,7 +34,7 @@ pkg/
   metrics/            – Prometheus + noop metrics
   oteltracer/         – OpenTelemetry tracer exporter setup
   respbuilder/        – uniform JSON envelope (Ok/Error)
-  sqldb/              – SQL DB helpers
+  sqldb/              – shared SQL DB interfaces, adapter, and optional slog operation logging
   validator/          – go-playground/validator wrapper + IsStrictUUIDv4
   ylog/               – slog + OpenTelemetry attribute injection
 transport/
@@ -85,6 +85,8 @@ Never construct a raw `map[string]interface{}` JSON response inline.
 
 ## Database
 
+- Use `pkg/sqldb` for all application SQL access. Wrap the `*sql.DB` opened at startup with `sqldb.New(db)`; pass `sqldb.DB` into service/repository constructors and `sqldb.DBTX` into methods that may run inside or outside a transaction. Do not pass raw `*sql.DB` into application repositories.
+- `sqldb.New(db, logger)` enables SQL operation logs; `sqldb.New(db)` disables adapter logs. Logs include SQL text, operation, duration, and errors, but never bind argument values. Use parameterized SQL and never embed secrets or sensitive values in SQL text.
 - If a domain introduces its own IDs, generate them as `int64` via **Sonyflake** (`pkg/idgen.NextID()`). Never use `SERIAL`/`IDENTITY`.
 - Prefer atomic, guarded `UPDATE ... WHERE <condition>` statements over read-then-write when mutating shared state under concurrency.
 
@@ -95,7 +97,7 @@ Never construct a raw `map[string]interface{}` JSON response inline.
 Service code that needs multiple writes in one atomic unit must:
 
 1. Call `db.BeginTx(ctx, nil)`.
-2. Pass the `*sql.Tx` to every repo method in the unit.
+2. Pass the `sqldb.Tx` to every repo method in the unit.
 3. `tx.Commit()` on success; `tx.Rollback()` on any error (use `defer` with a flag).
 
 ---
@@ -126,7 +128,7 @@ Run the same linter as CI:
 make lint
 ```
 
-Configuration: `.golangci.yml`. CI uses `golangci-lint v2.14.0` (`golangci/golangci-lint-action@v7`), built with the Go version from `go.mod`.
+Configuration: `.golangci.yml`. CI uses `golangci-lint v2.14.0` (`golangci/golangci-lint-action@v9.3.0`), built with the Go version from `go.mod`.
 
 ---
 

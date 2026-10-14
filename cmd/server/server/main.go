@@ -31,6 +31,7 @@ import (
 	"github.com/yusufsyaifudin/go-project-structure/internal/pkg/httpservermw"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/metrics"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/oteltracer"
+	"github.com/yusufsyaifudin/go-project-structure/pkg/sqldb"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/ylog"
 	"github.com/yusufsyaifudin/go-project-structure/transport/restapi"
@@ -53,7 +54,9 @@ type Config struct {
 	PostgresDSN     string `env:"POSTGRES_DSN" validate:"required"`
 }
 
-type Server struct{}
+type Server struct {
+	DB sqldb.DB
+}
 
 var _ cli.Command = (*Server)(nil)
 
@@ -197,6 +200,8 @@ func (s *Server) Run(_ []string) int {
 		slog.ErrorContext(systemCtx, "postgres ping failed", slog.Any("error", _err))
 		return exitCodeError
 	}
+	// Wrap the connection with the shared SQL interface and operation logger for services/repositories.
+	s.DB = sqldb.New(db, slog.Default())
 
 	startupTime := time.Now()
 
