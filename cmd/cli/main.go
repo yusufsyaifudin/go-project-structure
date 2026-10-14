@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env"
-	_ "github.com/joho/godotenv/autoload"
 	"github.com/hashicorp/cli"
+	_ "github.com/joho/godotenv/autoload"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"

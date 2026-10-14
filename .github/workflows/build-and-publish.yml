@@ -64,8 +64,9 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.12.2
-          args: --print-resources-usage --verbose --timeout=30m ./...
+          version: v2.14.0
+          install-mode: goinstall
+          args: --verbose --timeout=30m ./...
 
   # Build and publish server and CLI images.
   build-and-push-docker-images:

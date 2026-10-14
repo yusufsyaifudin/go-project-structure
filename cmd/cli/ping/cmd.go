@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jessevdk/go-flags"
 	"github.com/hashicorp/cli"
+	"github.com/jessevdk/go-flags"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"

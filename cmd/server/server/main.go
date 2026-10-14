@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/hashicorp/cli"
 	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/lib/pq"
-	"github.com/hashicorp/cli"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"

@@ -126,7 +126,7 @@ Run the same linter as CI:
 make lint
 ```
 
-Configuration: `.golangci.yml`.  CI uses `golangci-lint v2.12.2` (`golangci/golangci-lint-action@v7`).
+Configuration: `.golangci.yml`. CI uses `golangci-lint v2.14.0` (`golangci/golangci-lint-action@v7`), built with the Go version from `go.mod`.
 
 ---
 

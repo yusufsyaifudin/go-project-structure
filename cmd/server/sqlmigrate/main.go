@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/hashicorp/cli"
 	_ "github.com/joho/godotenv/autoload" // by default, we will read .env before the real env vars
 	_ "github.com/lib/pq"
-	"github.com/hashicorp/cli"
 
 	"github.com/yusufsyaifudin/go-project-structure/assets"
 	"github.com/yusufsyaifudin/go-project-structure/pkg/validator"

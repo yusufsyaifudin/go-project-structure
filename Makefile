@@ -38,7 +38,7 @@ test:
 	rm coverage.cov
 
 lint:
-	golangci-lint run --print-resources-usage --verbose --timeout=30m ./...
+	golangci-lint run --verbose --timeout=30m ./...
 
 # Generate swagger docs from swaggo annotations.
 # Must be run before building when annotations change.
